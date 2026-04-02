@@ -1,0 +1,23 @@
+[package]
+name = "reader_core"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = []
+keychain = ["keyring"]
+
+[dependencies]
+epub = "2.1"
+scraper = "0.21"
+serde = { version = "1", features = ["derive", "rc"] }
+serde_json = "1"
+sha2 = "0.10"
+base64 = "0.22"
+rsa = { version = "0.9", features = ["pem", "sha2"] }
+rand = "0.8"
+aes-gcm = "0.10"
+x25519-dalek = { version = "2", features = ["static_secrets"] }
+hkdf = "0.12"
+uuid = { version = "1", features = ["v4"] }
+keyring = { version = "3", optional = true }

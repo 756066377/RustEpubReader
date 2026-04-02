@@ -1,0 +1,25 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- 书本图标作为启动器图标 -->
+    <path
+        android:fillColor="#3884FF"
+        android:pathData="M30,25 L30,83 L78,83 L78,25 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M34,32 L74,32 L74,36 L34,36 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M34,40 L74,40 L74,43 L34,43 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M34,47 L64,47 L64,50 L34,50 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M34,54 L70,54 L70,57 L34,57 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M34,61 L60,61 L60,64 L34,64 Z" />
+</vector>

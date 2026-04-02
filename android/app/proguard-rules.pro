@@ -1,0 +1,3 @@
+-keep class com.zhongbai233.epub.reader.model.** { *; }
+-keepattributes *Annotation*
+-dontwarn org.jsoup.**

@@ -1,0 +1,246 @@
+package com.zhongbai233.epub.reader
+
+import android.net.Uri
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.*
+import androidx.compose.foundation.layout.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.foundation.background
+import androidx.compose.animation.core.tween
+import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.compose.ui.platform.LocalUriHandler
+import com.zhongbai233.epub.reader.ui.library.LibraryScreen
+import com.zhongbai233.epub.reader.ui.library.SharingDialog
+import com.zhongbai233.epub.reader.ui.reader.ReaderScreen
+import com.zhongbai233.epub.reader.ui.reader.TocDrawerContent
+import com.zhongbai233.epub.reader.ui.theme.EpubReaderTheme
+import com.zhongbai233.epub.reader.viewmodel.ReaderViewModel
+import com.zhongbai233.epub.reader.i18n.I18n
+import kotlinx.coroutines.launch
+
+class MainActivity : ComponentActivity() {
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
+
+        setContent {
+            val vm: ReaderViewModel = viewModel()
+
+            EpubReaderTheme(darkTheme = vm.isDarkMode) {
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = MaterialTheme.colorScheme.background
+                ) {
+                    MainContent(vm)
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun MainContent(vm: ReaderViewModel) {
+    // 读取 I18n.version 以确保语言切换时触发重组
+    @Suppress("UNUSED_VARIABLE")
+    val langVersion = I18n.version
+    val scope = rememberCoroutineScope()
+    val uriHandler = LocalUriHandler.current
+
+    // SAF 文件选择器
+    val filePicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        uri?.let { vm.openFromUri(it) }
+    }
+
+    val backgroundImagePicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        vm.updateReaderBgImage(uri?.toString())
+    }
+
+    // 目录抽屉状态
+    val drawerState = rememberDrawerState(DrawerValue.Closed)
+
+    // 共享对话框状态
+    var showSharingDialog by remember { mutableStateOf(false) }
+
+    // 错误提示
+    vm.errorMessage?.let { msg ->
+        AlertDialog(
+            onDismissRequest = { vm.dismissError() },
+            confirmButton = {
+                TextButton(onClick = { vm.dismissError() }) { Text(I18n.t("error.ok")) }
+            },
+            title = { Text(I18n.t("error.title")) },
+            text = { Text(msg) }
+        )
+    }
+
+    // 主内容 + 加载遮罩叠加
+    Box(Modifier.fillMaxSize()) {
+        // 主内容（加载完成后显示）
+        if (!vm.isLoading) {
+            val book = vm.currentBook
+
+            if (book == null) {
+                // ---- 书库界面 ----
+                LibraryScreen(
+                    books = vm.books,
+                    coverCache = vm.coverCache,
+                    language = vm.readerLanguage,
+                    onOpenFilePicker = {
+                        filePicker.launch(arrayOf("application/epub+zip", "application/epub", "*/*"))
+                    },
+                    onOpenBook = { uri, chapter ->
+                        vm.openFromPath(uri, chapter)
+                    },
+                    onRemoveBook = { uri ->
+                        vm.removeBookByUri(uri)
+                    },
+                    onUpdateLanguage = { code ->
+                        vm.updateLanguage(code)
+                    },
+                    onOpenSharing = {
+                        if (!vm.sharingServerRunning && vm.sharingPin.isEmpty()) {
+                            vm.generatePin()
+                        }
+                        vm.loadPairedDevices()
+                        showSharingDialog = true
+                    },
+                    onRefreshLibrary = {
+                        vm.refreshLibrary()
+                    }
+                )
+
+                // ── 共享对话框 ──
+                SharingDialog(
+                    showDialog = showSharingDialog,
+                    onDismiss = { showSharingDialog = false },
+                    serverRunning = vm.sharingServerRunning,
+                    serverAddr = vm.sharingServerAddr,
+                    pin = vm.sharingPin,
+                    connectAddr = vm.connectAddrInput,
+                    connectPin = vm.connectPinInput,
+                    sharingStatus = vm.sharingStatus,
+                    autoStartSharing = vm.autoStartSharing,
+                    pairedDevices = vm.pairedDevices,
+                    discoveredPeers = vm.discoveredPeers,
+                    onPinChange = { vm.sharingPin = it },
+                    onConnectAddrChange = { vm.connectAddrInput = it },
+                    onConnectPinChange = { vm.connectPinInput = it },
+                    onAutoStartChange = { vm.updateAutoStartSharing(it) },
+                    onStartServer = { vm.startSharingServer() },
+                    onStopServer = { vm.stopSharingServer() },
+                    onManualSync = { vm.manualSync() },
+                    onConnectToPeer = { addr, pin, deviceId -> vm.connectToPeer(addr, pin, deviceId) },
+                    onStartDiscovery = { vm.startDiscovery() },
+                    onRefreshPeers = { vm.refreshDiscoveredPeers() },
+                    onRemovePaired = { vm.removePairedDevice(it) },
+                    onExportLogs = { vm.exportFeedbackLogs() },
+                    onOpenGithubFeedback = {
+                        runCatching {
+                            uriHandler.openUri("https://github.com/zhongbai233/RustEpubReader/issues/new/choose")
+                        }
+                    },
+                )
+            } else {
+                // ---- 阅读器界面（包裹在目录抽屉中）----
+                ModalNavigationDrawer(
+                    drawerState = drawerState,
+                    gesturesEnabled = drawerState.isOpen,
+                    drawerContent = {
+                        ModalDrawerSheet {
+                            TocDrawerContent(
+                                toc = book.toc,
+                                currentChapter = vm.currentChapter,
+                                language = vm.readerLanguage,
+                                onSelectChapter = { idx ->
+                                    vm.goToChapter(idx)
+                                    scope.launch { drawerState.close() }
+                                },
+                                onClose = {
+                                    scope.launch { drawerState.close() }
+                                }
+                            )
+                        }
+                    }
+                ) {
+                    val chapter = if (book.chapters.isNotEmpty()) {
+                        book.chapters[vm.currentChapter.coerceIn(0, book.chapters.size - 1)]
+                    } else null
+
+                    ReaderScreen(
+                        book = book,
+                        currentChapter = vm.currentChapter,
+                        fontSize = vm.fontSize,
+                        isDarkMode = vm.isDarkMode,
+                        scrollMode = vm.isScrollMode,
+                        bgColorIndex = vm.readerBgColorIndex,
+                        customBgColorArgb = vm.readerCustomBgColorArgb,
+                        fontColorIndex = vm.readerFontColorIndex,
+                        customFontColorArgb = vm.readerCustomFontColorArgb,
+                        fontFamilyName = vm.readerFontFamily,
+                        pageAnimation = vm.readerPageAnimation,
+                        bgImageUri = vm.readerBgImageUri,
+                        bgImageAlpha = vm.readerBgImageAlpha,
+                        language = vm.readerLanguage,
+                        systemFonts = vm.systemFonts,
+                        showToc = drawerState.isOpen,
+                        onNavigateBack = { vm.closeBook() },
+                        onChapterChange = { vm.goToChapter(it) },
+                        previousChapter = vm.previousChapter,
+                        onGoBackChapter = { vm.goBackChapter() },
+                        onFontSizeChange = { vm.updateFontSize(it) },
+                        onToggleDarkMode = { vm.updateDarkMode(!vm.isDarkMode) },
+                        onToggleScrollMode = { vm.updateScrollMode(!vm.isScrollMode) },
+                        onUpdateScrollMode = { vm.updateScrollMode(it) },
+                        onUpdateDarkMode = { vm.updateDarkMode(it) },
+                        onUpdateBgColor = { vm.updateReaderBgColor(it) },
+                        onUpdateCustomBgColor = { vm.updateReaderCustomBgColor(it) },
+                        onUpdateFontColor = { vm.updateReaderFontColor(it) },
+                        onUpdateCustomFontColor = { vm.updateReaderCustomFontColor(it) },
+                        onUpdateFontFamily = { vm.updateReaderFontFamily(it) },
+                        onUpdatePageAnimation = { vm.updateReaderPageAnimation(it) },
+                        onUpdateBgImageAlpha = { vm.updateReaderBgImageAlpha(it) },
+                        onUpdateLanguage = { vm.updateLanguage(it) },
+                        onOpenBackgroundPicker = {
+                            backgroundImagePicker.launch(arrayOf("image/*"))
+                        },
+                        onClearBackgroundImage = { vm.updateReaderBgImage(null) },
+                        onToggleToc = {
+                            scope.launch { drawerState.open() }
+                        }
+                    )
+                }
+            }
+        }
+
+        // 加载遮罩：带淡出动画
+        AnimatedVisibility(
+            visible = vm.isLoading,
+            enter = fadeIn(animationSpec = tween(0)),
+            exit = fadeOut(animationSpec = tween(400))
+        ) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.background),
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator()
+            }
+        }
+    }
+}

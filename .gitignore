@@ -9,9 +9,30 @@ target/
 # MSVC Windows builds of rustc generate these, which store debugging information
 *.pdb
 
-# RustRover
-#  JetBrains specific template is maintained in a separate JetBrains.gitignore that can
-#  be found at https://github.com/github/gitignore/blob/main/Global/JetBrains.gitignore
-#  and can be added to the global gitignore or merged into this file.  For a more nuclear
-#  option (not recommended) you can uncomment the following to ignore the entire idea folder.
-#.idea/
+# RustRover / IntelliJ / Android Studio
+.idea/
+
+# Added by cargo
+/target
+
+# Android build outputs
+android/.gradle/
+android/.kotlin/
+android/build/
+android/app/build/
+android/app/bin/
+
+# Android local configuration (contains machine-specific SDK path)
+android/local.properties
+
+# Android signing keystore (NEVER commit)
+*.keystore
+*.jks
+
+# VS Code
+.vscode/
+
+library.json
+peers.json
+settings.json
+books/
