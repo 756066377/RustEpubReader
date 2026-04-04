@@ -68,6 +68,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import coil.compose.AsyncImage
 import eu.wewox.pagecurl.ExperimentalPageCurlApi
+import eu.wewox.pagecurl.config.PageCurlConfig
 import eu.wewox.pagecurl.config.rememberPageCurlConfig
 import eu.wewox.pagecurl.page.PageCurl
 import eu.wewox.pagecurl.page.rememberPageCurlState
@@ -677,6 +678,9 @@ private fun PageModeContent(
         backPageColor = bgColor,
         backPageContentAlpha = 0.25f,
         shadowAlpha = 0.35f,
+        dragInteraction = PageCurlConfig.GestureDragInteraction(
+            pointerBehavior = PageCurlConfig.DragInteraction.PointerBehavior.PageEdge
+        ),
         onCustomTap = { size, position ->
             if (currentSettingsVisible) return@rememberPageCurlConfig true
             val chromeInset = size.height * 0.12f
@@ -688,6 +692,7 @@ private fun PageModeContent(
                 return@rememberPageCurlConfig true
             }
             val tapZone = size.width / 3f
+            val spineCenter = size.width / 2f
             when {
                 position.x < tapZone -> {
                     val now = System.currentTimeMillis()
@@ -699,7 +704,8 @@ private fun PageModeContent(
                     }
                     true
                 }
-                position.x > size.width - tapZone -> {
+                position.x > spineCenter -> {
+                    // Tap anywhere on the right page (past spine) → forward
                     val now = System.currentTimeMillis()
                     if (now - lastFlipTime.longValue < flipCooldownMs) return@rememberPageCurlConfig true
                     lastFlipTime.longValue = now

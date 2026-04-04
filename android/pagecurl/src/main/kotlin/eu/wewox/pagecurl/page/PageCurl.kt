@@ -119,6 +119,7 @@ public fun PageCurl(
                                 Box(
                                     Modifier
                                         .fillMaxSize()
+                                        .graphicsLayer { clip = false }
                                         .drawCurlBackFlapBookSpread(updatedConfig, edge.top, edge.bottom, spineX)
                                 ) {
                                     Box(

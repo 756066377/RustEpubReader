@@ -391,12 +391,28 @@ internal fun Modifier.drawCurlBackFlapBookSpread(
     val angle = Math.PI.toFloat() - atan2(lineVector.y, lineVector.x) * 2
     val drawShadow = prepareShadow(config, polygon, angle)
 
+    // Shadow fade: only fade out in the last 15% near the spine
+    val avgCurlX = (topCurlOffset.x + bottomCurlOffset.x) / 2f
+    val halfWidth = size.width / 2f
+    val ratio = ((avgCurlX - spineX) / halfWidth.coerceAtLeast(1f)).coerceIn(0f, 1f)
+    val fadeStart = 0.15f // shadow starts fading when within 15% of spine
+    val shadowAlpha = if (ratio > fadeStart) 1f else (ratio / fadeStart).coerceIn(0f, 1f)
+
     onDrawWithContent {
         withTransform({
             scale(-1f, 1f, pivot = bottomCurlOffset)
             rotateRad(angle, pivot = bottomCurlOffset)
         }) {
-            this@onDrawWithContent.drawShadow()
+            if (shadowAlpha > 0.01f) {
+                // Use oversized bounds so shadow isn't clipped after fold transform
+                val pad = size.width
+                drawContext.canvas.saveLayer(
+                    androidx.compose.ui.geometry.Rect(-pad, -pad, size.width + pad, size.height + pad),
+                    androidx.compose.ui.graphics.Paint().apply { alpha = shadowAlpha }
+                )
+                this@onDrawWithContent.drawShadow()
+                drawContext.canvas.restore()
+            }
             clipPath(polygon.toPath()) {
                 this@onDrawWithContent.drawContent()
             }

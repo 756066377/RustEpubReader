@@ -323,19 +323,22 @@ private val DefaultPrev: suspend Animatable<Edge, AnimationVector4D>.(Size) -> U
 
 // BookSpread: both forward and backward use the same animation path (right edge → spine).
 // Visual direction difference is handled by scaleX=-1 in the rendering layer.
+// Animation starts from 2/3 height on the right edge and sweeps horizontally (parallel to bottom).
 private val BookSpreadDefaultAnim: suspend Animatable<Edge, AnimationVector4D>.(Size) -> Unit = { size ->
     animateTo(
         targetValue = size.spine,
         animationSpec = keyframes {
-            durationMillis = DefaultAnimDuration
-            size.end at 0
-            size.bookSpreadMiddle at DefaultMidPointDuration
+            durationMillis = BookSpreadAnimDuration
+            size.bookSpreadEdgeStart at 0
+            size.bookSpreadMiddle at BookSpreadMidPointDuration
         }
     )
 }
 
 private const val DefaultAnimDuration: Int = 450
 private const val DefaultMidPointDuration: Int = 150
+private const val BookSpreadAnimDuration: Int = 250
+private const val BookSpreadMidPointDuration: Int = 80
 
 private val Size.start: Edge
     get() = Edge(Offset(0f, 0f), Offset(0f, height))
@@ -349,5 +352,10 @@ private val Size.end: Edge
 private val Size.spine: Edge
     get() = Edge(Offset(width / 2f, 0f), Offset(width / 2f, height))
 
+// Start: vertical line segment at right edge, centered around 2/3 height
+private val Size.bookSpreadEdgeStart: Edge
+    get() = Edge(Offset(width, height * 0.5f), Offset(width, height * 0.83f))
+
+// Mid-point: near-vertical, sweeping horizontally toward spine (parallel to bottom edge)
 private val Size.bookSpreadMiddle: Edge
-    get() = Edge(Offset(width, height * 0.4f), Offset(width * 0.75f, height))
+    get() = Edge(Offset(width * 0.8f, height * 0.05f), Offset(width * 0.75f, height * 0.95f))
