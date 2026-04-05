@@ -365,6 +365,25 @@ pub struct ReaderApp {
     pub last_exported_feedback_log: Option<String>,
     pub show_about: bool,
     pub about_icon_texture: Option<egui::TextureHandle>,
+    // ── Self-update ──
+    pub update_state: UpdateState,
+    pub show_update_dialog: bool,
+    pub update_latest_tag: Option<String>,
+    pub _update_check_slot: Option<Arc<Mutex<Option<UpdateState>>>>,
+    pub _update_download_slot: Option<Arc<Mutex<Option<UpdateState>>>>,
+    pub _update_progress: Option<Arc<Mutex<f32>>>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub enum UpdateState {
+    #[default]
+    Idle,
+    Checking,
+    Available(String),
+    Downloading,
+    UpToDate,
+    Failed(String),
+    Restarting,
 }
 
 #[derive(Clone)]
@@ -467,6 +486,12 @@ impl Default for ReaderApp {
             last_exported_feedback_log: None,
             show_about: false,
             about_icon_texture: None,
+            update_state: UpdateState::Idle,
+            show_update_dialog: false,
+            update_latest_tag: None,
+            _update_check_slot: None,
+            _update_download_slot: None,
+            _update_progress: None,
         };
 
         if let Some(settings) = AppSettings::load(&app.data_dir) {
@@ -485,6 +510,23 @@ impl Default for ReaderApp {
         }
         app.push_feedback_log("app initialized");
         app.last_saved_settings = Some(AppSettings::from_app(&app));
+
+        // ── 启动时检查更新 ──
+        {
+            let slot: Arc<Mutex<Option<UpdateState>>> = Arc::new(Mutex::new(None));
+            let slot_clone = slot.clone();
+            std::thread::spawn(move || {
+                let result = match crate::self_update::check_latest_version() {
+                    Some((tag, _name)) => UpdateState::Available(tag),
+                    None => UpdateState::UpToDate,
+                };
+                if let Ok(mut s) = slot_clone.lock() {
+                    *s = Some(result);
+                }
+            });
+            app._update_check_slot = Some(slot);
+            app.update_state = UpdateState::Checking;
+        }
         app
     }
 }
@@ -769,6 +811,121 @@ impl ReaderApp {
         std::fs::write(&file_path, output).map_err(|e| format!("write log file: {e}"))?;
         Ok(file_path.to_string_lossy().to_string())
     }
+
+    fn render_update_dialog(&mut self, ctx: &egui::Context) {
+        let tag = self.update_latest_tag.clone().unwrap_or_default();
+        let mut open = self.show_update_dialog;
+        egui::Window::new(self.i18n.t("update.check"))
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.vertical_centered(|ui| {
+                    ui.add_space(8.0);
+                    ui.label(
+                        egui::RichText::new(self.i18n.tf1("update.new_version", &tag))
+                            .size(16.0)
+                            .strong(),
+                    );
+                    ui.add_space(12.0);
+
+                    match &self.update_state {
+                        UpdateState::Available(_) => {
+                            ui.horizontal(|ui| {
+                                if ui
+                                    .button(
+                                        egui::RichText::new(self.i18n.t("update.download_update"))
+                                            .size(14.0),
+                                    )
+                                    .clicked()
+                                {
+                                    self.update_state = UpdateState::Downloading;
+                                    let ctx = ui.ctx().clone();
+                                    let done_slot: Arc<Mutex<Option<UpdateState>>> =
+                                        Arc::new(Mutex::new(None));
+                                    let slot = done_slot.clone();
+                                    let progress_for_ui: Arc<Mutex<f32>> =
+                                        Arc::new(Mutex::new(0.0));
+                                    let progress_writer = progress_for_ui.clone();
+                                    std::thread::spawn(move || {
+                                        let cb_ctx = ctx.clone();
+                                        let pw = progress_writer;
+                                        let result = crate::self_update::perform_update(Some(
+                                            Box::new(move |downloaded, total| {
+                                                if total > 0 {
+                                                    let pct = downloaded as f32 / total as f32;
+                                                    if let Ok(mut p) = pw.lock() {
+                                                        *p = pct;
+                                                    }
+                                                    cb_ctx.request_repaint();
+                                                }
+                                            }),
+                                        ));
+                                        let state = match result {
+                                            Ok(
+                                                crate::self_update::UpdateOutcome::UpdateLaunched,
+                                            ) => UpdateState::Restarting,
+                                            Ok(_) => UpdateState::UpToDate,
+                                            Err(e) => UpdateState::Failed(e.to_string()),
+                                        };
+                                        if let Ok(mut s) = slot.lock() {
+                                            *s = Some(state);
+                                        }
+                                        ctx.request_repaint();
+                                    });
+                                    self._update_download_slot = Some(done_slot);
+                                    self._update_progress = Some(progress_for_ui);
+                                }
+                                if ui
+                                    .button(
+                                        egui::RichText::new(self.i18n.t("feedback.not_now"))
+                                            .size(14.0),
+                                    )
+                                    .clicked()
+                                {
+                                    self.show_update_dialog = false;
+                                }
+                            });
+                        }
+                        UpdateState::Downloading => {
+                            let pct = self
+                                ._update_progress
+                                .as_ref()
+                                .and_then(|p| p.lock().ok().map(|v| *v))
+                                .unwrap_or(0.0);
+                            ui.label(
+                                egui::RichText::new(self.i18n.t("update.downloading")).size(13.0),
+                            );
+                            ui.add(egui::ProgressBar::new(pct).show_percentage());
+                            ui.ctx().request_repaint();
+                        }
+                        UpdateState::Failed(msg) => {
+                            ui.label(
+                                egui::RichText::new(self.i18n.tf1("update.failed", msg))
+                                    .size(13.0)
+                                    .color(egui::Color32::from_rgb(255, 100, 100)),
+                            );
+                            ui.add_space(4.0);
+                            if ui.button(self.i18n.t("update.check")).clicked() {
+                                self.show_update_dialog = false;
+                                self.update_state = UpdateState::Idle;
+                            }
+                        }
+                        UpdateState::Restarting => {
+                            ui.label(
+                                egui::RichText::new(self.i18n.t("update.restarting"))
+                                    .size(14.0)
+                                    .color(egui::Color32::from_rgb(80, 200, 120)),
+                            );
+                        }
+                        _ => {}
+                    }
+                    ui.add_space(8.0);
+                });
+            });
+        self.show_update_dialog = open;
+    }
 }
 
 impl eframe::App for ReaderApp {
@@ -781,6 +938,50 @@ impl eframe::App for ReaderApp {
                     self.system_font_paths = paths;
                 }
             }
+        }
+
+        // --- Poll startup update check result ---
+        if matches!(self.update_state, UpdateState::Checking) {
+            if let Some(ref slot) = self._update_check_slot {
+                if let Ok(s) = slot.lock() {
+                    if let Some(ref state) = *s {
+                        match state {
+                            UpdateState::Available(tag) => {
+                                self.update_latest_tag = Some(tag.clone());
+                                self.show_update_dialog = true;
+                                self.update_state = UpdateState::Available(tag.clone());
+                            }
+                            _ => {
+                                self.update_state = state.clone();
+                            }
+                        }
+                        // drop will happen, but clear slot next frame
+                    }
+                }
+                if !matches!(self.update_state, UpdateState::Checking) {
+                    self._update_check_slot = None;
+                }
+            }
+        }
+
+        // --- Poll download result (if downloading in background) ---
+        if matches!(self.update_state, UpdateState::Downloading) {
+            if let Some(ref slot) = self._update_download_slot {
+                if let Ok(s) = slot.lock() {
+                    if let Some(ref state) = *s {
+                        self.update_state = state.clone();
+                    }
+                }
+                if !matches!(self.update_state, UpdateState::Downloading) {
+                    self._update_download_slot = None;
+                    self._update_progress = None;
+                }
+            }
+        }
+
+        // --- Startup update available dialog ---
+        if self.show_update_dialog {
+            self.render_update_dialog(ctx);
         }
 
         // --- Handle incoming sync updates ---

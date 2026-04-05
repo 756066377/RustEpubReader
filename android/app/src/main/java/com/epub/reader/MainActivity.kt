@@ -92,6 +92,30 @@ private fun MainContent(vm: ReaderViewModel) {
         )
     }
 
+    // 更新提示弹窗
+    if (vm.showUpdateDialog) {
+        vm.updateInfo?.let { info ->
+            AlertDialog(
+                onDismissRequest = { vm.dismissUpdateDialog() },
+                confirmButton = {
+                    TextButton(onClick = {
+                        vm.dismissUpdateDialog()
+                        runCatching { uriHandler.openUri(info.downloadUrl) }
+                    }) {
+                        Text(I18n.t("update.download_update"))
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { vm.dismissUpdateDialog() }) {
+                        Text(I18n.t("feedback.not_now"))
+                    }
+                },
+                title = { Text(I18n.t("update.check")) },
+                text = { Text(I18n.tf1("update.new_version", info.tagName)) }
+            )
+        }
+    }
+
     // 主内容 + 加载遮罩叠加
     Box(Modifier.fillMaxSize()) {
         // 主内容（加载完成后显示）

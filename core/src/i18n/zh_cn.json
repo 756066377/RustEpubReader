@@ -154,5 +154,14 @@
   "nav.dark_mode": "夜间模式",
   "nav.light_mode": "日间模式",
   "library.delete": "删除",
-  "error.temp_file_failed": "临时文件创建失败"
+  "error.temp_file_failed": "临时文件创建失败",
+
+  "update.check": "检查更新",
+  "update.checking": "正在检查…",
+  "update.downloading": "正在下载更新…",
+  "update.up_to_date": "已是最新版本",
+  "update.new_version": "发现新版本: {}",
+  "update.download_update": "下载并更新",
+  "update.failed": "更新失败: {}",
+  "update.restarting": "更新完成，即将重启…"
 }

@@ -1,0 +1,88 @@
+name: "Issue 报告"
+description: 反馈 Bug / 使用问题 / 功能建议
+title: "[Issue] "
+labels: ["NEW"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈！为了更快定位问题，请尽量提供：
+        - **程序版本**（关于页面可查看）
+        - **操作系统与平台**（Windows / macOS / Linux / Android）
+        - **复现步骤**
+
+  - type: dropdown
+    id: issue_type
+    attributes:
+      label: 问题类型
+      description: 请选择最接近的类型
+      options:
+        - Bug（功能异常/崩溃）
+        - Question（使用疑问）
+        - Enhancement（功能建议）
+        - Documentation（文档问题）
+    validations:
+      required: true
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: 平台
+      description: 问题出现在哪个平台？
+      multiple: true
+      options:
+        - Windows (x64)
+        - Windows (ARM64)
+        - macOS (Apple Silicon)
+        - macOS (Intel)
+        - Linux (x64)
+        - Linux (ARM64)
+        - Android
+    validations:
+      required: true
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: 问题描述
+      description: 发生了什么？你期望的结果是什么？
+      placeholder: |
+        例如：打开某本 EPUB 时闪退，期望能正常显示内容。
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce_steps
+    attributes:
+      label: 复现步骤（可选但建议）
+      description: 尽量按步骤描述，方便快速复现
+      placeholder: |
+        1. 打开程序
+        2. 导入 xxx.epub
+        3. 翻到第 N 章
+        4. 发生了什么错误
+    validations:
+      required: false
+
+  - type: input
+    id: version
+    attributes:
+      label: 程序版本
+      description: 在"关于"页面可查看版本号
+      placeholder: 例如：v1.0.0
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志与截图（建议）
+      description: |
+        可通过"关于"页面的"导出日志"功能导出日志文件，拖拽上传到此处。
+        也可粘贴关键报错信息或附上截图。
+      placeholder: |
+        - 已附日志：是/否
+        - 关键报错：
+        - 截图：
+    validations:
+      required: false

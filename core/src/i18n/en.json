@@ -154,5 +154,14 @@
   "nav.dark_mode": "Dark Mode",
   "nav.light_mode": "Light Mode",
   "library.delete": "Delete",
-  "error.temp_file_failed": "Failed to create temp file"
+  "error.temp_file_failed": "Failed to create temp file",
+
+  "update.check": "Check for Updates",
+  "update.checking": "Checking…",
+  "update.downloading": "Downloading update…",
+  "update.up_to_date": "You are up to date",
+  "update.new_version": "New version available: {}",
+  "update.download_update": "Download & Update",
+  "update.failed": "Update failed: {}",
+  "update.restarting": "Update complete, restarting…"
 }

@@ -18,6 +18,8 @@ import com.zhongbai233.epub.reader.i18n.I18n
 import com.zhongbai233.epub.reader.util.FontDiscovery
 import com.zhongbai233.epub.reader.util.FontItem
 import com.zhongbai233.epub.reader.RustBridge
+import com.zhongbai233.epub.reader.BuildConfig
+import com.zhongbai233.epub.reader.util.UpdateChecker
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -103,6 +105,12 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
     val discoveredPeers = mutableStateListOf<DiscoveredPeer>()
     val sharingLogs = mutableStateListOf<String>()
 
+    // ---- 更新状态 ----
+    var updateInfo by mutableStateOf<UpdateChecker.UpdateInfo?>(null)
+        private set
+    var showUpdateDialog by mutableStateOf(false)
+        private set
+
     @Volatile
     private var autoSyncInProgress: Boolean = false
     private val autoSyncLastAttemptAt = ConcurrentHashMap<String, Long>()
@@ -145,6 +153,15 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
         if (lastUri != null) {
             val lastChapter = prefs.getInt(PrefKeys.LAST_BOOK_CHAPTER, 0)
             openFromPath(lastUri, lastChapter)
+        }
+
+        // 启动时检查更新
+        viewModelScope.launch {
+            val info = UpdateChecker.checkForUpdate(BuildConfig.APP_VERSION_NAME)
+            if (info != null) {
+                updateInfo = info
+                showUpdateDialog = true
+            }
         }
     }
 
@@ -655,6 +672,10 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
 
     fun dismissError() {
         errorMessage = null
+    }
+
+    fun dismissUpdateDialog() {
+        showUpdateDialog = false
     }
 
     // ---- �������� ----
