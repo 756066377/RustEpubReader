@@ -4,5 +4,5 @@ resolver = "2"
 
 # ── Unified app version (edit here to update globally) ──
 [workspace.package]
-version = "1.0.0"
+version = "1.0.1"
 authors = ["zhongbai233"]
