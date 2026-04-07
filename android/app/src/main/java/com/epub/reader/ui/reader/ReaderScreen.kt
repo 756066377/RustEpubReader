@@ -505,15 +505,8 @@ fun ReaderScreen(
                 isBookmarked = isChapterBookmarked,
                 onNavigateBack = onNavigateBack,
                 onGoBackChapter = onGoBackChapter,
-                onToggleToc = onToggleToc,
-                onOpenSettings = {
-                    showControls = true
-                    showSettingsSheet = true
-                },
                 onToggleSearch = onToggleSearch,
-                onToggleBookmark = onToggleBookmark,
-                onShowAnnotations = onShowAnnotations,
-                onToggleTts = onTtsPlay
+                onToggleBookmark = onToggleBookmark
             )
         }
 
@@ -550,7 +543,14 @@ fun ReaderScreen(
                 isDarkMode = isDarkMode,
                 onFontSizeChange = onFontSizeChange,
                 onToggleScrollMode = onToggleScrollMode,
-                onToggleDarkMode = onToggleDarkMode
+                onToggleDarkMode = onToggleDarkMode,
+                onToggleToc = onToggleToc,
+                onShowAnnotations = onShowAnnotations,
+                onToggleTts = onTtsPlay,
+                onOpenSettings = {
+                    showControls = true
+                    showSettingsSheet = true
+                }
             )
         }
 
@@ -2602,12 +2602,8 @@ private fun ReaderTopBar(
     isBookmarked: Boolean = false,
     onNavigateBack: () -> Unit,
     onGoBackChapter: () -> Unit,
-    onToggleToc: () -> Unit,
-    onOpenSettings: () -> Unit,
     onToggleSearch: () -> Unit,
-    onToggleBookmark: () -> Unit = {},
-    onShowAnnotations: () -> Unit = {},
-    onToggleTts: () -> Unit = {}
+    onToggleBookmark: () -> Unit = {}
 ) {
     TopAppBar(
         title = {
@@ -2641,9 +2637,6 @@ private fun ReaderTopBar(
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, I18n.t("reader.go_back_chapter"))
                 }
             }
-            IconButton(onClick = onToggleToc) {
-                Icon(Icons.AutoMirrored.Filled.MenuBook, I18n.t("nav.toc"))
-            }
             IconButton(onClick = onToggleSearch) {
                 Icon(Icons.Default.Search, I18n.t("search.title"))
             }
@@ -2653,16 +2646,6 @@ private fun ReaderTopBar(
                     contentDescription = I18n.t("annotations.add_bookmark"),
                     tint = if (isBookmarked) Color(0xFFFF9800) else LocalContentColor.current
                 )
-            }
-            IconButton(onClick = onShowAnnotations) {
-                Icon(Icons.Default.EditNote, I18n.t("annotations.title"))
-            }
-            @Suppress("DEPRECATION")
-            IconButton(onClick = onToggleTts) {
-                Icon(Icons.Default.VolumeUp, I18n.t("toolbar.tts"))
-            }
-            IconButton(onClick = onOpenSettings) {
-                Icon(Icons.Default.Settings, I18n.t("nav.reading_settings"))
             }
         },
         colors = TopAppBarDefaults.topAppBarColors(
@@ -2680,68 +2663,100 @@ private fun ReaderBottomBar(
     isDarkMode: Boolean,
     onFontSizeChange: (Float) -> Unit,
     onToggleScrollMode: () -> Unit,
-    onToggleDarkMode: () -> Unit
+    onToggleDarkMode: () -> Unit,
+    onToggleToc: () -> Unit,
+    onShowAnnotations: () -> Unit,
+    onToggleTts: () -> Unit,
+    onOpenSettings: () -> Unit
 ) {
     Surface(
         color = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f),
         modifier = Modifier
             .fillMaxWidth()
     ) {
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .navigationBarsPadding()
-                .padding(horizontal = 16.dp, vertical = 10.dp),
-            horizontalArrangement = Arrangement.SpaceEvenly,
-            verticalAlignment = Alignment.CenterVertically
         ) {
-            // 字体缩小
-            OutlinedButton(
-                onClick = { if (fontSize > 12f) onFontSizeChange(fontSize - 2f) },
-                modifier = Modifier.size(40.dp),
-                shape = CircleShape,
-                contentPadding = PaddingValues(0.dp),
-                enabled = fontSize > 12f
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("A-", fontSize = 13.sp, fontWeight = FontWeight.Bold)
-            }
+                // 字体缩小
+                OutlinedButton(
+                    onClick = { if (fontSize > 12f) onFontSizeChange(fontSize - 2f) },
+                    modifier = Modifier.size(40.dp),
+                    shape = CircleShape,
+                    contentPadding = PaddingValues(0.dp),
+                    enabled = fontSize > 12f
+                ) {
+                    Text("A-", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                }
 
-            Text("${fontSize.toInt()}sp", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("${fontSize.toInt()}sp", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
-            // 字体放大
-            OutlinedButton(
-                onClick = { if (fontSize < 40f) onFontSizeChange(fontSize + 2f) },
-                modifier = Modifier.size(40.dp),
-                shape = CircleShape,
-                contentPadding = PaddingValues(0.dp),
-                enabled = fontSize < 40f
-            ) {
-                Text("A+", fontSize = 13.sp, fontWeight = FontWeight.Bold)
-            }
+                // 字体放大
+                OutlinedButton(
+                    onClick = { if (fontSize < 40f) onFontSizeChange(fontSize + 2f) },
+                    modifier = Modifier.size(40.dp),
+                    shape = CircleShape,
+                    contentPadding = PaddingValues(0.dp),
+                    enabled = fontSize < 40f
+                ) {
+                    Text("A+", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                }
 
-            // 分隔
-            Box(
-                Modifier
-                    .width(1.dp)
-                    .height(24.dp)
-                    .background(MaterialTheme.colorScheme.outlineVariant)
-            )
+                // 分隔
+                Box(
+                    Modifier
+                        .width(1.dp)
+                        .height(24.dp)
+                        .background(MaterialTheme.colorScheme.outlineVariant)
+                )
 
-            // 滚动/翻页切换
-            IconButton(onClick = onToggleScrollMode) {
-                if (scrollMode) {
-                    Icon(Icons.Default.SwapVert, I18n.t("nav.scroll_mode"))
-                } else {
-                    Icon(Icons.AutoMirrored.Filled.MenuBook, I18n.t("nav.page_mode"))
+                // 滚动/翻页切换
+                IconButton(onClick = onToggleScrollMode) {
+                    if (scrollMode) {
+                        Icon(Icons.Default.SwapVert, I18n.t("nav.scroll_mode"))
+                    } else {
+                        Icon(Icons.AutoMirrored.Filled.MenuBook, I18n.t("nav.page_mode"))
+                    }
+                }
+
+                // 日/夜间模式
+                IconButton(onClick = onToggleDarkMode) {
+                    if (isDarkMode) {
+                        Icon(Icons.Default.DarkMode, I18n.t("nav.dark_mode"))
+                    } else {
+                        Icon(Icons.Default.LightMode, I18n.t("nav.light_mode"))
+                    }
                 }
             }
 
-            // 日/夜间模式
-            IconButton(onClick = onToggleDarkMode) {
-                if (isDarkMode) {
-                    Icon(Icons.Default.DarkMode, I18n.t("nav.dark_mode"))
-                } else {
-                    Icon(Icons.Default.LightMode, I18n.t("nav.light_mode"))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+                    .padding(bottom = 10.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onClick = onToggleToc) {
+                    Icon(Icons.Default.FormatListBulleted, I18n.t("nav.toc"))
+                }
+                IconButton(onClick = onShowAnnotations) {
+                    Icon(Icons.Default.EditNote, I18n.t("annotations.title"))
+                }
+                @Suppress("DEPRECATION")
+                IconButton(onClick = onToggleTts) {
+                    Icon(Icons.Default.VolumeUp, I18n.t("toolbar.tts"))
+                }
+                IconButton(onClick = onOpenSettings) {
+                    Icon(Icons.Default.Settings, I18n.t("nav.reading_settings"))
                 }
             }
         }
