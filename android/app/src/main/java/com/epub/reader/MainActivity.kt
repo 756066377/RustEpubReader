@@ -290,7 +290,46 @@ private fun MainContent(vm: ReaderViewModel) {
                         onAddHighlight = { ch, sb, so, eb, eo, color ->
                             vm.addHighlight(ch, sb, so, eb, eo, color)
                         },
-                        onSaveNote = { hlId, content -> vm.saveNote(hlId, content) }
+                        onSaveNote = { hlId, content -> vm.saveNote(hlId, content) },
+                        lineSpacing = vm.lineSpacing,
+                        paraSpacing = vm.paraSpacing,
+                        textIndent = vm.textIndent,
+                        onLineSpacingChange = { vm.updateLineSpacing(it) },
+                        onParaSpacingChange = { vm.updateParaSpacing(it) },
+                        onTextIndentChange = { vm.updateTextIndent(it) },
+                        translateApiUrl = vm.translateApiUrl,
+                        translateApiKey = vm.translateApiKey,
+                        dictionaryApiUrl = vm.dictionaryApiUrl,
+                        dictionaryApiKey = vm.dictionaryApiKey,
+                        onTranslateApiUrlChange = { vm.updateTranslateApiUrl(it) },
+                        onTranslateApiKeyChange = { vm.updateTranslateApiKey(it) },
+                        onDictionaryApiUrlChange = { vm.updateDictionaryApiUrl(it) },
+                        onDictionaryApiKeyChange = { vm.updateDictionaryApiKey(it) },
+                        ttsVoiceName = vm.ttsVoiceName,
+                        ttsRate = vm.ttsRate,
+                        ttsVolume = vm.ttsVolume,
+                        onTtsVoiceNameChange = { vm.updateTtsVoiceName(it) },
+                        onTtsRateChange = { vm.updateTtsRate(it) },
+                        onTtsVolumeChange = { vm.updateTtsVolume(it) },
+                        // TTS playback
+                        showTtsBar = vm.showTtsBar,
+                        ttsPlaying = vm.ttsManager.playing.collectAsState().value,
+                        ttsPaused = vm.ttsManager.paused.collectAsState().value,
+                        ttsStatus = vm.ttsManager.status.collectAsState().value,
+                        ttsCurrentBlock = vm.ttsManager.currentBlock.collectAsState().value,
+                        onTtsPlay = { vm.ttsStartPlayback() },
+                        onTtsPause = { vm.ttsTogglePause() },
+                        onTtsResume = { vm.ttsTogglePause() },
+                        onTtsStop = { vm.ttsStopPlayback() },
+                        onTtsClose = { vm.ttsCloseTtsBar() },
+                        cscMode = vm.cscMode,
+                        cscThreshold = vm.cscThreshold,
+                        onCscModeChange = { vm.updateCscMode(it) },
+                        onCscThresholdChange = { vm.updateCscThreshold(it) },
+                        cscModelReady = vm.cscModelReady,
+                        cscModelLoading = vm.cscModelLoading,
+                        cscCorrections = vm.cscCorrections,
+                        onDownloadCscModel = { vm.downloadCscModel() }
                     )
 
                     // 标注面板

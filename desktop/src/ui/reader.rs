@@ -2037,24 +2037,39 @@ fn render_block(
                 font_family_name,
                 &[],
             );
-            let first_link = spans.iter().find_map(|s| s.link_url.as_deref());
             ui.add_space(font_size * 0.8);
             let is_tts_block = TTS_HIGHLIGHT_BLOCK.get() == Some(chapter_block_idx);
-            if let Some(url) = first_link {
-                let response = ui.add(egui::Label::new(job).sense(egui::Sense::click()));
-                if is_tts_block {
-                    paint_tts_highlight(ui, response.rect);
-                }
-                if response.hovered() {
-                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-                }
-                if response.clicked() {
-                    *clicked_link = Some(url.to_string());
-                }
-            } else {
-                let response = ui.label(job);
-                if is_tts_block {
-                    paint_tts_highlight(ui, response.rect);
+            let galley = ui.painter().layout_job(job);
+            let galley_size = galley.size();
+            let (rect, response) = ui.allocate_exact_size(galley_size, egui::Sense::click_and_drag());
+            
+            if is_tts_block {
+                paint_tts_highlight(ui, rect);
+            }
+            ui.painter().galley(rect.min, galley.clone(), Color32::PLACEHOLDER);
+
+            // Handle individual link clicks via pointer position matching
+            if let Some(hover_pos) = ui.ctx().pointer_hover_pos() {
+                if rect.contains(hover_pos) {
+                    if let Some(cursor) = galley.cursor_from_pos(hover_pos - rect.min) {
+                        let mut cumulative = 0;
+                        let mut hovered_url = None;
+                        for span in spans {
+                            let span_len = span.text.chars().count();
+                            if cursor.ccursor.index >= cumulative && cursor.ccursor.index < cumulative + span_len {
+                                hovered_url = span.link_url.clone();
+                                break;
+                            }
+                            cumulative += span_len;
+                        }
+                        
+                        if let Some(url) = hovered_url {
+                            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                            if response.clicked() {
+                                *clicked_link = Some(url);
+                            }
+                        }
+                    }
                 }
             }
             ui.add_space(font_size * 0.4);
@@ -2138,7 +2153,6 @@ fn render_block(
                 font_family_name,
                 highlight_ranges,
             );
-            let first_link = display_spans.iter().find_map(|s| s.link_url.as_deref());
             let text: String = display_spans.iter().map(|s| s.text.as_str()).collect();
 
             // Layout into Galley, allocate space, and paint manually
@@ -2246,16 +2260,31 @@ fn render_block(
 
             // Push into per-frame cache for the selection state machine
             BLOCK_GALLEYS.with(|bg| {
-                bg.borrow_mut().push((chapter_block_idx, galley, rect, text.clone()));
+                bg.borrow_mut().push((chapter_block_idx, galley.clone(), rect, text.clone()));
             });
 
-            // Handle link clicks
-            if let Some(url) = first_link {
-                if response.hovered() {
-                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-                }
-                if response.clicked() {
-                    *clicked_link = Some(url.to_string());
+            // Handle individual link clicks via pointer position matching
+            if let Some(hover_pos) = ui.ctx().pointer_hover_pos() {
+                if rect.contains(hover_pos) {
+                    if let Some(cursor) = galley.cursor_from_pos(hover_pos - rect.min) {
+                        let mut cumulative = 0;
+                        let mut hovered_url = None;
+                        for span in &display_spans {
+                            let span_len = span.text.chars().count();
+                            if cursor.ccursor.index >= cumulative && cursor.ccursor.index < cumulative + span_len {
+                                hovered_url = span.link_url.clone();
+                                break;
+                            }
+                            cumulative += span_len;
+                        }
+                        
+                        if let Some(url) = hovered_url {
+                            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                            if response.clicked() {
+                                *clicked_link = Some(url);
+                            }
+                        }
+                    }
                 }
             }
             ui.add_space(font_size * para_spacing());

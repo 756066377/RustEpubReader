@@ -251,7 +251,10 @@
   "tts.stop": "⏹ Stop",
   "tts.synthesizing": "Synthesizing…",
   "tts.playing": "Playing…",
+  "tts.paused": "Paused",
+  "tts.ready": "Ready to play",
   "tts.chapter_done": "Chapter finished",
+  "tts.rate_normal": "Normal",
   "toolbar.tts": "🔊 TTS",
   "toolbar.api_settings": "⚙ API Settings",
 
@@ -319,5 +322,30 @@
   "csc.contribute_success": "PR created: {}",
   "csc.contribute_error": "Submission failed: {}",
   "csc.contribute_no_data": "No correction data to submit",
-  "csc.login_github": "Log in to GitHub"
+  "csc.login_github": "Log in to GitHub",
+
+  "selection.copy": "Copy",
+  "selection.highlight": "Highlight",
+  "selection.note": "Note",
+  "selection.dictionary": "Dictionary",
+  "selection.translate": "Translate",
+  "selection.correct": "Correct…",
+
+  "settings.line_spacing": "Line Spacing",
+  "settings.para_spacing": "Paragraph Spacing",
+  "settings.text_indent": "Text Indent",
+  "settings.typography": "Typography",
+  "settings.api_settings": "API Settings",
+  "settings.translate_api_url": "Translate API URL",
+  "settings.translate_api_key": "Translate API Key",
+  "settings.dictionary_api_url": "Dictionary API URL",
+  "settings.dictionary_api_key": "Dictionary API Key",
+  "settings.tts_settings": "Text-to-Speech",
+  "settings.tts_voice": "Voice",
+  "settings.tts_rate": "Speed",
+  "settings.tts_volume": "Volume",
+  "settings.csc_settings": "Chinese Spell Check",
+  "settings.csc_mode": "Correction Mode",
+  "settings.csc_threshold": "Threshold",
+  "settings.chars": "chars"
 }

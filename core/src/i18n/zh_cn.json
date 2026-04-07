@@ -251,7 +251,10 @@
   "tts.stop": "⏹ 停止",
   "tts.synthesizing": "合成中…",
   "tts.playing": "正在朗读…",
+  "tts.paused": "已暂停",
+  "tts.ready": "等待播放",
   "tts.chapter_done": "本章朗读完毕",
+  "tts.rate_normal": "正常",
   "toolbar.tts": "🔊 朗读",
   "toolbar.api_settings": "⚙ API设置",
 
@@ -319,5 +322,30 @@
   "csc.contribute_success": "PR 已创建：{}",
   "csc.contribute_error": "提交失败：{}",
   "csc.contribute_no_data": "没有可提交的纠错数据",
-  "csc.login_github": "登录 GitHub"
+  "csc.login_github": "登录 GitHub",
+
+  "selection.copy": "复制",
+  "selection.highlight": "高亮",
+  "selection.note": "笔记",
+  "selection.dictionary": "词典",
+  "selection.translate": "翻译",
+  "selection.correct": "更改为…",
+
+  "settings.line_spacing": "行间距",
+  "settings.para_spacing": "段间距",
+  "settings.text_indent": "首行缩进",
+  "settings.typography": "排版",
+  "settings.api_settings": "API 设置",
+  "settings.translate_api_url": "翻译 API 地址",
+  "settings.translate_api_key": "翻译 API 密钥",
+  "settings.dictionary_api_url": "词典 API 地址",
+  "settings.dictionary_api_key": "词典 API 密钥",
+  "settings.tts_settings": "语音朗读",
+  "settings.tts_voice": "朗读语音",
+  "settings.tts_rate": "语速",
+  "settings.tts_volume": "音量",
+  "settings.csc_settings": "中文纠错",
+  "settings.csc_mode": "纠错模式",
+  "settings.csc_threshold": "纠错力度",
+  "settings.chars": "字符"
 }

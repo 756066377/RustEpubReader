@@ -43,7 +43,9 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalTextToolbar
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.*
@@ -158,7 +160,50 @@ fun ReaderScreen(
     highlights: List<HighlightDto> = emptyList(),
     notes: List<NoteDto> = emptyList(),
     onAddHighlight: (Int, Int, Int, Int, Int, String) -> Unit = { _, _, _, _, _, _ -> },
-    onSaveNote: (String, String) -> Unit = { _, _ -> }
+    onSaveNote: (String, String) -> Unit = { _, _ -> },
+    // 排版
+    lineSpacing: Float = 1.5f,
+    paraSpacing: Float = 0.5f,
+    textIndent: Int = 2,
+    onLineSpacingChange: (Float) -> Unit = {},
+    onParaSpacingChange: (Float) -> Unit = {},
+    onTextIndentChange: (Int) -> Unit = {},
+    // API
+    translateApiUrl: String = "",
+    translateApiKey: String = "",
+    dictionaryApiUrl: String = "",
+    dictionaryApiKey: String = "",
+    onTranslateApiUrlChange: (String) -> Unit = {},
+    onTranslateApiKeyChange: (String) -> Unit = {},
+    onDictionaryApiUrlChange: (String) -> Unit = {},
+    onDictionaryApiKeyChange: (String) -> Unit = {},
+    // TTS
+    ttsVoiceName: String = "zh-CN-XiaoxiaoNeural",
+    ttsRate: Int = 0,
+    ttsVolume: Int = 0,
+    onTtsVoiceNameChange: (String) -> Unit = {},
+    onTtsRateChange: (Int) -> Unit = {},
+    onTtsVolumeChange: (Int) -> Unit = {},
+    // TTS playback
+    showTtsBar: Boolean = false,
+    ttsPlaying: Boolean = false,
+    ttsPaused: Boolean = false,
+    ttsStatus: String = "",
+    ttsCurrentBlock: Int = -1,
+    onTtsPlay: () -> Unit = {},
+    onTtsPause: () -> Unit = {},
+    onTtsResume: () -> Unit = {},
+    onTtsStop: () -> Unit = {},
+    onTtsClose: () -> Unit = {},
+    // CSC
+    cscMode: String = "none",
+    cscThreshold: String = "standard",
+    onCscModeChange: (String) -> Unit = {},
+    onCscThresholdChange: (String) -> Unit = {},
+    cscModelReady: Boolean = false,
+    cscModelLoading: Boolean = false,
+    cscCorrections: List<com.zhongbai233.epub.reader.csc.CorrectionInfo> = emptyList(),
+    onDownloadCscModel: () -> Unit = {}
 ) {
     val chapter = book.chapters.getOrNull(currentChapter)
     val uriHandler = LocalUriHandler.current
@@ -210,6 +255,26 @@ fun ReaderScreen(
     var showControls by remember { mutableStateOf(false) }
     var showSettingsSheet by rememberSaveable { mutableStateOf(false) }
     val startAtLastPageRef = remember { booleanArrayOf(false) }
+
+    // ─── 自定义选区工具栏状态 ───
+    var selectionMenuVisible by remember { mutableStateOf(false) }
+    var selectionRect by remember { mutableStateOf(androidx.compose.ui.geometry.Rect.Zero) }
+    var selectionCopyCallback by remember { mutableStateOf<(() -> Unit)?>(null) }
+    val clipboardManager = LocalClipboardManager.current
+
+    val customTextToolbar = remember {
+        CustomTextToolbar(
+            onShowMenu = { rect, onCopy ->
+                selectionRect = rect
+                selectionCopyCallback = onCopy
+                selectionMenuVisible = true
+            },
+            onHideMenu = {
+                selectionMenuVisible = false
+                selectionCopyCallback = null
+            }
+        )
+    }
 
     // 读取 I18n.version 以确保语言切换时触发重组
     @Suppress("UNUSED_VARIABLE")
@@ -283,6 +348,7 @@ fun ReaderScreen(
         }
     }
 
+    CompositionLocalProvider(LocalTextToolbar provides customTextToolbar) {
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -344,7 +410,10 @@ fun ReaderScreen(
                         onToggleBookmark()
                         bookmarkSnackText = if (!isChapterBookmarked) I18n.t("annotations.bookmark_added")
                         else I18n.t("annotations.bookmark_removed")
-                    }
+                    },
+                    lineSpacing = lineSpacing,
+                    paraSpacing = paraSpacing,
+                    textIndent = textIndent
                 )
 
                 // 书签下拉指示文字
@@ -401,7 +470,10 @@ fun ReaderScreen(
                         showControls = !showControls
                     }
                 },
-                onLinkClick = onLinkClick
+                onLinkClick = onLinkClick,
+                lineSpacing = lineSpacing,
+                paraSpacing = paraSpacing,
+                textIndent = textIndent
             )
         }
 
@@ -430,15 +502,27 @@ fun ReaderScreen(
                 onToggleSearch = onToggleSearch,
                 onToggleBookmark = onToggleBookmark,
                 onShowAnnotations = onShowAnnotations,
-                onPrevChapter = {
-                    if (currentChapter > 0) {
-                        startAtLastPageRef[0] = true
-                        onChapterChange(currentChapter - 1)
-                    }
-                },
-                onNextChapter = {
-                    if (currentChapter < book.chapters.size - 1) onChapterChange(currentChapter + 1)
-                }
+                onToggleTts = onTtsPlay
+            )
+        }
+
+        // TTS 控制栏
+        AnimatedVisibility(
+            visible = showTtsBar,
+            enter = slideInVertically { -it } + fadeIn(),
+            exit = slideOutVertically { -it } + fadeOut(),
+            modifier = Modifier.align(Alignment.TopCenter).padding(top = if (showControls) 56.dp else 0.dp)
+        ) {
+            TtsControlBar(
+                playing = ttsPlaying,
+                paused = ttsPaused,
+                status = ttsStatus,
+                currentBlockIndex = ttsCurrentBlock,
+                onPlay = onTtsPlay,
+                onPause = onTtsPause,
+                onResume = onTtsResume,
+                onStop = onTtsStop,
+                onClose = onTtsClose
             )
         }
 
@@ -487,10 +571,81 @@ fun ReaderScreen(
                 onBgImageAlphaChange = onUpdateBgImageAlpha,
                 onLanguageChange = onUpdateLanguage,
                 onPickBackgroundImage = onOpenBackgroundPicker,
-                onClearBackgroundImage = onClearBackgroundImage
+                onClearBackgroundImage = onClearBackgroundImage,
+                lineSpacing = lineSpacing,
+                paraSpacing = paraSpacing,
+                textIndent = textIndent,
+                onLineSpacingChange = onLineSpacingChange,
+                onParaSpacingChange = onParaSpacingChange,
+                onTextIndentChange = onTextIndentChange,
+                translateApiUrl = translateApiUrl,
+                translateApiKey = translateApiKey,
+                dictionaryApiUrl = dictionaryApiUrl,
+                dictionaryApiKey = dictionaryApiKey,
+                onTranslateApiUrlChange = onTranslateApiUrlChange,
+                onTranslateApiKeyChange = onTranslateApiKeyChange,
+                onDictionaryApiUrlChange = onDictionaryApiUrlChange,
+                onDictionaryApiKeyChange = onDictionaryApiKeyChange,
+                ttsVoiceName = ttsVoiceName,
+                ttsRate = ttsRate,
+                ttsVolume = ttsVolume,
+                onTtsVoiceNameChange = onTtsVoiceNameChange,
+                onTtsRateChange = onTtsRateChange,
+                onTtsVolumeChange = onTtsVolumeChange,
+                cscMode = cscMode,
+                cscThreshold = cscThreshold,
+                onCscModeChange = onCscModeChange,
+                onCscThresholdChange = onCscThresholdChange,
+                cscModelReady = cscModelReady,
+                cscModelLoading = cscModelLoading,
+                onDownloadCscModel = onDownloadCscModel
             )
         }
+
+        // ─── 自定义选区悬浮菜单 ───
+        SelectionFloatingMenu(
+            visible = selectionMenuVisible,
+            selectionRect = selectionRect,
+            isDarkMode = isDarkMode,
+            onAction = { action ->
+                when (action) {
+                    SelectionAction.COPY -> {
+                        selectionCopyCallback?.invoke()
+                        selectionMenuVisible = false
+                    }
+                    SelectionAction.HIGHLIGHT -> {
+                        selectionCopyCallback?.invoke()
+                        selectionMenuVisible = false
+                        // TODO: 接入高亮创建流程
+                    }
+                    SelectionAction.NOTE -> {
+                        selectionCopyCallback?.invoke()
+                        selectionMenuVisible = false
+                        // TODO: 接入笔记创建流程
+                    }
+                    SelectionAction.DICTIONARY -> {
+                        selectionCopyCallback?.invoke()
+                        selectionMenuVisible = false
+                        // TODO: 接入词典 API
+                    }
+                    SelectionAction.TRANSLATE -> {
+                        selectionCopyCallback?.invoke()
+                        selectionMenuVisible = false
+                        // TODO: 接入翻译 API
+                    }
+                    SelectionAction.CORRECT -> {
+                        selectionCopyCallback?.invoke()
+                        selectionMenuVisible = false
+                        // TODO: 接入纠错流程
+                    }
+                }
+            },
+            onDismiss = {
+                selectionMenuVisible = false
+            }
+        )
     }
+    } // CompositionLocalProvider
 }
 
 // ─── 搜索对话框 ───
@@ -578,7 +733,10 @@ private fun ScrollModeContent(
     bgColor: Color,
     fontFamily: FontFamily,
     onLinkClick: (String) -> Unit,
-    onOverscrollDown: () -> Unit = {}
+    onOverscrollDown: () -> Unit = {},
+    lineSpacing: Float = 1.5f,
+    paraSpacing: Float = 0.5f,
+    textIndent: Int = 2
 ) {
     val listState = rememberLazyListState()
     val showChapterTitle = remember(chapter) { shouldRenderChapterTitle(chapter) }
@@ -671,7 +829,10 @@ private fun ScrollModeContent(
                 textColor = textColor,
                 linkColor = linkColor,
                 fontFamily = fontFamily,
-                onLinkClick = onLinkClick
+                onLinkClick = onLinkClick,
+                lineSpacing = lineSpacing,
+                paraSpacing = paraSpacing,
+                textIndentChars = textIndent
             )
         }
 
@@ -701,7 +862,10 @@ private fun PageModeContent(
     onPrevChapter: () -> Unit,
     onNextChapter: () -> Unit,
     onToggleControls: () -> Unit,
-    onLinkClick: (String) -> Unit
+    onLinkClick: (String) -> Unit,
+    lineSpacing: Float = 1.5f,
+    paraSpacing: Float = 0.5f,
+    textIndent: Int = 2
 ) {
     val configuration = LocalConfiguration.current
     val density = LocalDensity.current
@@ -726,7 +890,7 @@ private fun PageModeContent(
 
     // 预加载缓存（以章节索引为 key，布局参数变化时清空，LRU 限制最多 10 章防止 OOM）
     val paginationCache = remember { lruCache<Int, List<List<ContentBlock>>>(PAGINATION_CACHE_MAX_SIZE) }
-    val layoutTag = "$fontSize-${availableHeightDp.value}-${contentWidthDp.value}"
+    val layoutTag = "$fontSize-${availableHeightDp.value}-${contentWidthDp.value}-$lineSpacing-$paraSpacing-$textIndent"
     val prevLayoutTag = remember { mutableStateOf(layoutTag) }
     if (prevLayoutTag.value != layoutTag) {
         prevLayoutTag.value = layoutTag
@@ -734,9 +898,9 @@ private fun PageModeContent(
     }
 
     // 将内容分页（优先从缓存取，避免主线程重复计算）
-    val pages = remember(currentChapter, fontSize, availableHeightDp, contentWidthDp, showChapterTitle) {
+    val pages = remember(currentChapter, fontSize, availableHeightDp, contentWidthDp, showChapterTitle, lineSpacing, paraSpacing, textIndent) {
         paginationCache.getOrPut(currentChapter) {
-            paginateContent(chapter, fontSize, availableHeightDp, contentWidthDp, density, showChapterTitle, titleVPaddingDp)
+            paginateContent(chapter, fontSize, availableHeightDp, contentWidthDp, density, showChapterTitle, titleVPaddingDp, lineSpacing, paraSpacing, textIndent)
         }
     }
     
@@ -751,7 +915,7 @@ private fun PageModeContent(
                 val adjChapter = allChapters.getOrNull(adjIdx) ?: continue
                 paginationCache.getOrPut(adjIdx) {
                     val adjShowTitle = shouldRenderChapterTitle(adjChapter)
-                    paginateContent(adjChapter, fontSize, availableHeightDp, contentWidthDp, density, adjShowTitle, titleVPaddingDp)
+                    paginateContent(adjChapter, fontSize, availableHeightDp, contentWidthDp, density, adjShowTitle, titleVPaddingDp, lineSpacing, paraSpacing, textIndent)
                 }
             }
         }
@@ -1176,7 +1340,10 @@ private fun PageModeContent(
                     bottomPaddingDp = bottomPaddingDp,
                     slotPageLabel = slotPageLabel,
                     onLinkClick = onLinkClick,
-                    isTwoColumn = isTwoColumn
+                    isTwoColumn = isTwoColumn,
+                    lineSpacing = lineSpacing,
+                    paraSpacing = paraSpacing,
+                    textIndentChars = textIndent
                 )
             }
         } else if (pageAnimation == "Realistic") {
@@ -1264,7 +1431,10 @@ private fun PageModeContent(
                     topPaddingDp = topPaddingDp,
                     bottomPaddingDp = bottomPaddingDp,
                     slotPageLabel = slotPageLabel,
-                    onLinkClick = onLinkClick
+                    onLinkClick = onLinkClick,
+                    lineSpacing = lineSpacing,
+                    paraSpacing = paraSpacing,
+                    textIndentChars = textIndent
                 )
             }
         } else {
@@ -1394,7 +1564,10 @@ private fun PageModeContent(
                         topPaddingDp = topPaddingDp,
                         bottomPaddingDp = bottomPaddingDp,
                         slotPageLabel = slotPageLabel,
-                        onLinkClick = onLinkClick
+                        onLinkClick = onLinkClick,
+                        lineSpacing = lineSpacing,
+                        paraSpacing = paraSpacing,
+                        textIndentChars = textIndent
                     )
                 }
             }
@@ -1411,7 +1584,11 @@ fun ContentBlockView(
     textColor: Color,
     linkColor: Color,
     fontFamily: FontFamily,
-    onLinkClick: (String) -> Unit
+    onLinkClick: (String) -> Unit,
+    onTextTapped: () -> Unit,
+    lineSpacing: Float = 1.5f,
+    paraSpacing: Float = 0.5f,
+    textIndentChars: Int = 2
 ) {
     when (block) {
         is ContentBlock.Heading -> {
@@ -1432,7 +1609,7 @@ fun ContentBlockView(
             )
             val headingStyle = TextStyle(
                 fontFamily = fontFamily,
-                lineHeight = (fontSize * scale * 1.5f).sp,
+                lineHeight = (fontSize * scale * lineSpacing).sp,
                 platformStyle = PlatformTextStyle(includeFontPadding = false),
                 lineHeightStyle = LineHeightStyle(
                     alignment = LineHeightStyle.Alignment.Center,
@@ -1441,10 +1618,28 @@ fun ContentBlockView(
             )
 
             SelectionContainer {
+                var layoutResult by remember { mutableStateOf<TextLayoutResult?>(null) }
                 Text(
                     text = annotated,
                     style = headingStyle,
-                    modifier = Modifier.padding(top = (fontSize * 1.2f).dp, bottom = (fontSize * 1.8f).dp)
+                    modifier = Modifier
+                        .padding(top = (fontSize * 1.2f).dp, bottom = (fontSize * 1.8f).dp)
+                        .pointerInput(annotated, onLinkClick) {
+                            detectTapGestures { pos ->
+                                layoutResult?.let { result ->
+                                    val offset = result.getOffsetForPosition(pos)
+                                    val annotations = annotated.getStringAnnotations(tag = "URL", start = offset, end = offset)
+                                    if (annotations.isNotEmpty()) {
+                                        onLinkClick(annotations.first().item)
+                                    } else {
+                                        onTextTapped()
+                                    }
+                                } ?: run {
+                                    onTextTapped()
+                                }
+                            }
+                        },
+                    onTextLayout = { layoutResult = it }
                 )
             }
         }
@@ -1461,8 +1656,8 @@ fun ContentBlockView(
             )
             val baseStyle = TextStyle(
                 fontFamily = fontFamily,
-                textIndent = TextIndent(firstLine = (fontSize * 2).sp),
-                lineHeight = (fontSize * 1.5f).sp,
+                textIndent = TextIndent(firstLine = (fontSize * textIndentChars).sp),
+                lineHeight = (fontSize * lineSpacing).sp,
                 platformStyle = PlatformTextStyle(includeFontPadding = false),
                 lineHeightStyle = LineHeightStyle(
                     alignment = LineHeightStyle.Alignment.Center,
@@ -1471,10 +1666,28 @@ fun ContentBlockView(
             )
             
             SelectionContainer {
+                var layoutResult by remember { mutableStateOf<TextLayoutResult?>(null) }
                 Text(
                     text = annotated,
-                    modifier = Modifier.padding(vertical = (fontSize * 0.5f).dp),
-                    style = baseStyle
+                    modifier = Modifier
+                        .padding(vertical = (fontSize * paraSpacing).dp)
+                        .pointerInput(annotated, onLinkClick) {
+                            detectTapGestures { pos ->
+                                layoutResult?.let { result ->
+                                    val offset = result.getOffsetForPosition(pos)
+                                    val annotations = annotated.getStringAnnotations(tag = "URL", start = offset, end = offset)
+                                    if (annotations.isNotEmpty()) {
+                                        onLinkClick(annotations.first().item)
+                                    } else {
+                                        onTextTapped()
+                                    }
+                                } ?: run {
+                                    onTextTapped()
+                                }
+                            }
+                        },
+                    style = baseStyle,
+                    onTextLayout = { layoutResult = it }
                 )
             }
         }
@@ -1560,6 +1773,7 @@ private fun buildSpanAnnotatedString(
             val end = length
             val url = span.linkUrl
             if (url != null && end > start) {
+                // Compose 1.7 LinkAnnotation
                 addLink(
                     LinkAnnotation.Clickable(
                         tag = url,
@@ -1567,6 +1781,13 @@ private fun buildSpanAnnotatedString(
                     ),
                     start,
                     end
+                )
+                // 兼容 SelectionContainer 的手动捕获
+                addStringAnnotation(
+                    tag = "URL",
+                    annotation = url,
+                    start = start,
+                    end = end
                 )
             }
         }
@@ -1619,12 +1840,15 @@ private fun paginateContent(
     contentWidth: Dp,
     density: androidx.compose.ui.unit.Density,
     showChapterTitle: Boolean,
-    titleVPaddingDp: Dp = 32.dp
+    titleVPaddingDp: Dp = 32.dp,
+    lineSpacing: Float = 1.5f,
+    paraSpacing: Float = 0.5f,
+    textIndentChars: Int = 2
 ): List<List<ContentBlock>> {
     val contentWidthPx = with(density) { contentWidth.toPx() }
     // sp → px 需要乘 fontScale（处理系统字体缩放）
     val spToPx = density.fontScale * density.density
-    val lineHeight = fontSize * 1.5f * spToPx
+    val lineHeight = fontSize * lineSpacing * spToPx
     
     // 采用更精准的容错边距（不再一次性扣除40dp+整行高，那会导致严重底部留白）
     // 给系统布局误差保留 0.5 行高的弹性空间足矣，因为屏幕 padding 本身已避开页码
@@ -1649,7 +1873,7 @@ private fun paginateContent(
     }
 
     for (block in chapter.blocks) {
-        val blockHeight = estimateBlockHeight(block, fontSize, lineHeight, contentWidthPx, density)
+        val blockHeight = estimateBlockHeight(block, fontSize, lineHeight, contentWidthPx, density, paraSpacing, textIndentChars)
 
         if (currentHeight + blockHeight > maxHeightPx && currentPage.isNotEmpty()) {
             pages.add(currentPage.toList())
@@ -1674,7 +1898,9 @@ private fun estimateBlockHeight(
     fontSize: Float,
     lineHeight: Float,
     contentWidthPx: Float,
-    density: androidx.compose.ui.unit.Density
+    density: androidx.compose.ui.unit.Density,
+    paraSpacing: Float = 0.5f,
+    textIndentChars: Int = 2
 ): Float {
     return when (block) {
         is ContentBlock.Heading -> {
@@ -1706,10 +1932,10 @@ private fun estimateBlockHeight(
             }
             // 中文字体平均严格占宽 1.05em (包括字距)，英文平均大约在 0.55em
             val estimatedTextWidthPx = (cjkCount * 1.05f + asciiCount * 0.55f) * (fontSize * spToPx)
-            // 加上默认首行缩进的 2em + 适当的尾行排版容错
-            val totalWidthPx = estimatedTextWidthPx + (fontSize * spToPx * 2.5f)
+            // 加上首行缩进的 em + 适当的尾行排版容错
+            val totalWidthPx = estimatedTextWidthPx + (fontSize * spToPx * (textIndentChars + 0.5f))
             val lines = ceil(totalWidthPx / contentWidthPx).toInt().coerceAtLeast(1)
-            lines * lineHeight + fontSize * 1.0f * density.density
+            lines * lineHeight + fontSize * (paraSpacing * 2f) * density.density
         }
         is ContentBlock.Image -> {
             estimateImageBlockHeight(
@@ -1782,7 +2008,38 @@ private fun ReaderSettingsSheet(
     onBgImageAlphaChange: (Float) -> Unit,
     onLanguageChange: (String) -> Unit,
     onPickBackgroundImage: () -> Unit,
-    onClearBackgroundImage: () -> Unit
+    onClearBackgroundImage: () -> Unit,
+    // 排版
+    lineSpacing: Float = 1.5f,
+    paraSpacing: Float = 0.5f,
+    textIndent: Int = 2,
+    onLineSpacingChange: (Float) -> Unit = {},
+    onParaSpacingChange: (Float) -> Unit = {},
+    onTextIndentChange: (Int) -> Unit = {},
+    // API
+    translateApiUrl: String = "",
+    translateApiKey: String = "",
+    dictionaryApiUrl: String = "",
+    dictionaryApiKey: String = "",
+    onTranslateApiUrlChange: (String) -> Unit = {},
+    onTranslateApiKeyChange: (String) -> Unit = {},
+    onDictionaryApiUrlChange: (String) -> Unit = {},
+    onDictionaryApiKeyChange: (String) -> Unit = {},
+    // TTS
+    ttsVoiceName: String = "zh-CN-XiaoxiaoNeural",
+    ttsRate: Int = 0,
+    ttsVolume: Int = 0,
+    onTtsVoiceNameChange: (String) -> Unit = {},
+    onTtsRateChange: (Int) -> Unit = {},
+    onTtsVolumeChange: (Int) -> Unit = {},
+    // CSC
+    cscMode: String = "none",
+    cscThreshold: String = "standard",
+    onCscModeChange: (String) -> Unit = {},
+    onCscThresholdChange: (String) -> Unit = {},
+    cscModelReady: Boolean = false,
+    cscModelLoading: Boolean = false,
+    onDownloadCscModel: () -> Unit = {}
 ) {
     val bgOptions = listOf(I18n.t("color.warm_white"), I18n.t("color.light_gray"), I18n.t("color.bean_green"), I18n.t("color.deep_night"), I18n.t("color.graphite"), I18n.t("settings.custom"))
     val fontColorOptions = listOf(I18n.t("color.auto"), I18n.t("color.ink_black"), I18n.t("color.dark_gray"), I18n.t("color.light_gray"), I18n.t("color.cream"), I18n.t("settings.custom"))
@@ -2007,6 +2264,258 @@ private fun ReaderSettingsSheet(
                 }
             }
 
+            // ─── 排版设置 ───
+            Spacer(Modifier.height(16.dp))
+            HorizontalDivider()
+            Spacer(Modifier.height(12.dp))
+            Text(I18n.t("settings.typography"), style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(8.dp))
+
+            Text("${I18n.t("settings.line_spacing")}: ${"%.1f".format(lineSpacing)}")
+            Slider(
+                value = lineSpacing,
+                onValueChange = onLineSpacingChange,
+                valueRange = 1.0f..3.0f,
+                steps = 19
+            )
+
+            Text("${I18n.t("settings.para_spacing")}: ${"%.1f".format(paraSpacing)}")
+            Slider(
+                value = paraSpacing,
+                onValueChange = onParaSpacingChange,
+                valueRange = 0.0f..2.0f,
+                steps = 19
+            )
+
+            Text("${I18n.t("settings.text_indent")}: $textIndent ${I18n.t("settings.chars")}")
+            Slider(
+                value = textIndent.toFloat(),
+                onValueChange = { onTextIndentChange(it.toInt()) },
+                valueRange = 0f..4f,
+                steps = 3
+            )
+
+            // ─── API 设置 ───
+            Spacer(Modifier.height(16.dp))
+            HorizontalDivider()
+            Spacer(Modifier.height(12.dp))
+            Text(I18n.t("settings.api_settings"), style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(8.dp))
+
+            Text(I18n.t("settings.translate_section"), style = MaterialTheme.typography.labelLarge)
+            Spacer(Modifier.height(4.dp))
+            OutlinedTextField(
+                value = translateApiUrl,
+                onValueChange = onTranslateApiUrlChange,
+                label = { Text(I18n.t("settings.translate_api_url")) },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+                placeholder = { Text("https://api.example.com/translate") }
+            )
+            Spacer(Modifier.height(4.dp))
+            var translateKeyVisible by remember { mutableStateOf(false) }
+            OutlinedTextField(
+                value = translateApiKey,
+                onValueChange = onTranslateApiKeyChange,
+                label = { Text(I18n.t("settings.translate_api_key")) },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+                visualTransformation = if (translateKeyVisible)
+                    androidx.compose.ui.text.input.VisualTransformation.None
+                else
+                    androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                trailingIcon = {
+                    IconButton(onClick = { translateKeyVisible = !translateKeyVisible }) {
+                        Icon(
+                            if (translateKeyVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                            contentDescription = null
+                        )
+                    }
+                },
+                placeholder = { Text("sk-...") }
+            )
+
+            Spacer(Modifier.height(12.dp))
+            Text(I18n.t("settings.dictionary_section"), style = MaterialTheme.typography.labelLarge)
+            Spacer(Modifier.height(4.dp))
+            OutlinedTextField(
+                value = dictionaryApiUrl,
+                onValueChange = onDictionaryApiUrlChange,
+                label = { Text(I18n.t("settings.dictionary_api_url")) },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+                placeholder = { Text("https://api.example.com/dictionary") }
+            )
+            Spacer(Modifier.height(4.dp))
+            var dictKeyVisible by remember { mutableStateOf(false) }
+            OutlinedTextField(
+                value = dictionaryApiKey,
+                onValueChange = onDictionaryApiKeyChange,
+                label = { Text(I18n.t("settings.dictionary_api_key")) },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+                visualTransformation = if (dictKeyVisible)
+                    androidx.compose.ui.text.input.VisualTransformation.None
+                else
+                    androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                trailingIcon = {
+                    IconButton(onClick = { dictKeyVisible = !dictKeyVisible }) {
+                        Icon(
+                            if (dictKeyVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                            contentDescription = null
+                        )
+                    }
+                },
+                placeholder = { Text("sk-...") }
+            )
+
+            // ─── TTS 设置 ───
+            Spacer(Modifier.height(16.dp))
+            HorizontalDivider()
+            Spacer(Modifier.height(12.dp))
+            Text(I18n.t("settings.tts_settings"), style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(8.dp))
+
+            val voicePresets = listOf(
+                "zh-CN-XiaoxiaoNeural" to "晓晓 (女)",
+                "zh-CN-YunyangNeural" to "云扬 (男)",
+                "zh-CN-XiaoyiNeural" to "晓依 (女)",
+                "zh-CN-YunjianNeural" to "云健 (男)",
+                "zh-CN-YunxiNeural" to "云希 (男)",
+                "zh-CN-XiaochenNeural" to "晓辰 (女)",
+                "zh-CN-XiaohanNeural" to "晓涵 (女)",
+                "zh-CN-XiaomoNeural" to "晓墨 (女)",
+                "zh-CN-XiaoruiNeural" to "晓睿 (女)",
+                "zh-CN-XiaoshuangNeural" to "晓双 (女)",
+                "en-US-AriaNeural" to "Aria (EN Female)",
+                "en-US-GuyNeural" to "Guy (EN Male)",
+                "ja-JP-NanamiNeural" to "Nanami (JP Female)"
+            )
+            val rateOptions = listOf(-50 to "-50%", -25 to "-25%", 0 to I18n.t("tts.rate_normal"), 25 to "+25%", 50 to "+50%", 100 to "+100%")
+            val volumeOptions = listOf(-50 to "-50%", -25 to "-25%", 0 to I18n.t("tts.rate_normal"), 25 to "+25%", 50 to "+50%")
+
+            var voiceDropdownExpanded by remember { mutableStateOf(false) }
+            Text(I18n.t("settings.tts_voice"))
+            Box {
+                OutlinedButton(
+                    onClick = { voiceDropdownExpanded = true },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        voicePresets.firstOrNull { it.first == ttsVoiceName }?.second ?: ttsVoiceName,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Icon(Icons.Default.ArrowDropDown, contentDescription = null)
+                }
+                DropdownMenu(
+                    expanded = voiceDropdownExpanded,
+                    onDismissRequest = { voiceDropdownExpanded = false },
+                    modifier = Modifier.fillMaxWidth(0.9f)
+                ) {
+                    voicePresets.forEach { (name, label) ->
+                        DropdownMenuItem(
+                            text = { Text(label) },
+                            onClick = {
+                                onTtsVoiceNameChange(name)
+                                voiceDropdownExpanded = false
+                            },
+                            leadingIcon = if (ttsVoiceName == name) {
+                                { Icon(Icons.Default.Check, contentDescription = null) }
+                            } else null
+                        )
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+            Text(I18n.t("settings.tts_rate"))
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.horizontalScroll(rememberScrollState())
+            ) {
+                rateOptions.forEach { (value, label) ->
+                    FilterChip(
+                        selected = ttsRate == value,
+                        onClick = { onTtsRateChange(value) },
+                        label = { Text(label) }
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+            Text(I18n.t("settings.tts_volume"))
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.horizontalScroll(rememberScrollState())
+            ) {
+                volumeOptions.forEach { (value, label) ->
+                    FilterChip(
+                        selected = ttsVolume == value,
+                        onClick = { onTtsVolumeChange(value) },
+                        label = { Text(label) }
+                    )
+                }
+            }
+
+            // ─── CSC 中文纠错设置 ───
+            Spacer(Modifier.height(16.dp))
+            HorizontalDivider()
+            Spacer(Modifier.height(12.dp))
+            Text(I18n.t("settings.csc_settings"), style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(8.dp))
+
+            Text(I18n.t("settings.csc_mode"))
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.horizontalScroll(rememberScrollState())
+            ) {
+                listOf("none" to I18n.t("csc.mode_none"), "readonly" to I18n.t("csc.mode_readonly"), "readwrite" to I18n.t("csc.mode_readwrite")).forEach { (mode, label) ->
+                    FilterChip(
+                        selected = cscMode == mode,
+                        onClick = { onCscModeChange(mode) },
+                        label = { Text(label) }
+                    )
+                }
+            }
+
+            if (cscMode != "none") {
+                Spacer(Modifier.height(8.dp))
+                Text(I18n.t("settings.csc_threshold"))
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.horizontalScroll(rememberScrollState())
+                ) {
+                    listOf("conservative" to I18n.t("csc.conservative"), "standard" to I18n.t("csc.standard"), "aggressive" to I18n.t("csc.aggressive")).forEach { (th, label) ->
+                        FilterChip(
+                            selected = cscThreshold == th,
+                            onClick = { onCscThresholdChange(th) },
+                            label = { Text(label) }
+                        )
+                    }
+                }
+
+                // Model status
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    if (cscModelReady) {
+                        Icon(Icons.Default.CheckCircle, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                        Text(I18n.t("csc.model_ready"), style = MaterialTheme.typography.bodySmall)
+                    } else if (cscModelLoading) {
+                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                        Text(I18n.t("csc.loading_model"), style = MaterialTheme.typography.bodySmall)
+                    } else {
+                        Icon(Icons.Default.Warning, null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(18.dp))
+                        Text(I18n.t("csc.model_not_downloaded"), style = MaterialTheme.typography.bodySmall)
+                        TextButton(onClick = onDownloadCscModel) {
+                            Text(I18n.t("csc.download_model"))
+                        }
+                    }
+                }
+            }
+
             Spacer(Modifier.height(20.dp))
         }
     }
@@ -2081,8 +2590,7 @@ private fun ReaderTopBar(
     onToggleSearch: () -> Unit,
     onToggleBookmark: () -> Unit = {},
     onShowAnnotations: () -> Unit = {},
-    onPrevChapter: () -> Unit,
-    onNextChapter: () -> Unit
+    onToggleTts: () -> Unit = {}
 ) {
     TopAppBar(
         title = {
@@ -2132,14 +2640,12 @@ private fun ReaderTopBar(
             IconButton(onClick = onShowAnnotations) {
                 Icon(Icons.Default.EditNote, I18n.t("annotations.title"))
             }
+            @Suppress("DEPRECATION")
+            IconButton(onClick = onToggleTts) {
+                Icon(Icons.Default.VolumeUp, I18n.t("toolbar.tts"))
+            }
             IconButton(onClick = onOpenSettings) {
                 Icon(Icons.Default.Settings, I18n.t("nav.reading_settings"))
-            }
-            IconButton(onClick = onPrevChapter) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, I18n.t("nav.prev_chapter"))
-            }
-            IconButton(onClick = onNextChapter) {
-                Icon(Icons.AutoMirrored.Filled.ArrowForward, I18n.t("nav.next_chapter"))
             }
         },
         colors = TopAppBarDefaults.topAppBarColors(
@@ -2241,7 +2747,11 @@ private fun PageRenderLayer(
     bottomPaddingDp: androidx.compose.ui.unit.Dp,
     slotPageLabel: String,
     onLinkClick: (String) -> Unit,
-    isTwoColumn: Boolean = false
+    onTextTapped: () -> Unit,
+    isTwoColumn: Boolean = false,
+    lineSpacing: Float = 1.5f,
+    paraSpacing: Float = 0.5f,
+    textIndentChars: Int = 2
 ) {
     androidx.compose.foundation.layout.Box(
         modifier = Modifier
@@ -2289,7 +2799,11 @@ private fun PageRenderLayer(
                             textColor = textColor,
                             linkColor = linkColor,
                             fontFamily = fontFamily,
-                            onLinkClick = onLinkClick
+                            onLinkClick = onLinkClick,
+                            onTextTapped = onTextTapped,
+                            lineSpacing = lineSpacing,
+                            paraSpacing = paraSpacing,
+                            textIndentChars = textIndentChars
                         )
                     }
                 }

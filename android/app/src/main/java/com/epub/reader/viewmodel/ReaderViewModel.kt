@@ -20,6 +20,9 @@ import com.zhongbai233.epub.reader.util.FontItem
 import com.zhongbai233.epub.reader.RustBridge
 import com.zhongbai233.epub.reader.BuildConfig
 import com.zhongbai233.epub.reader.util.UpdateChecker
+import com.zhongbai233.epub.reader.tts.TtsManager
+import com.zhongbai233.epub.reader.csc.CscEngine
+import com.zhongbai233.epub.reader.csc.CorrectionInfo
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -85,6 +88,52 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
     var readerLanguage by mutableStateOf("auto")
         private set
     var systemFonts by mutableStateOf<List<FontItem>>(emptyList())
+        private set
+
+    // ---- 排版设置 ----
+    var lineSpacing by mutableFloatStateOf(1.5f)
+        private set
+    var paraSpacing by mutableFloatStateOf(0.5f)
+        private set
+    var textIndent by mutableIntStateOf(2)
+        private set
+
+    // ---- API 设置 ----
+    var translateApiUrl by mutableStateOf("")
+        private set
+    var translateApiKey by mutableStateOf("")
+        private set
+    var dictionaryApiUrl by mutableStateOf("")
+        private set
+    var dictionaryApiKey by mutableStateOf("")
+        private set
+
+    // ---- TTS 设置 ----
+    var ttsVoiceName by mutableStateOf("zh-CN-XiaoxiaoNeural")
+        private set
+    var ttsRate by mutableIntStateOf(0)
+        private set
+    var ttsVolume by mutableIntStateOf(0)
+        private set
+
+    // ---- TTS 播放状态 ----
+    val ttsManager = TtsManager(application)
+    var showTtsBar by mutableStateOf(false)
+        private set
+
+    // ---- CSC 设置 ----
+    var cscMode by mutableStateOf("none")
+        private set
+    var cscThreshold by mutableStateOf("standard")
+        private set
+
+    // ---- CSC 引擎 ----
+    val cscEngine = CscEngine()
+    var cscModelReady by mutableStateOf(false)
+        private set
+    var cscModelLoading by mutableStateOf(false)
+        private set
+    var cscCorrections by mutableStateOf<List<CorrectionInfo>>(emptyList())
         private set
 
     // ---- ����״̬ ----
@@ -224,6 +273,11 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
                 showUpdateDialog = true
             }
         }
+
+        // Auto-load CSC model if enabled
+        if (cscMode != "none") {
+            loadCscModel()
+        }
     }
 
     private object PrefKeys {
@@ -244,6 +298,18 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
         const val AUTO_START_SHARING = "auto_start_sharing"
         const val GITHUB_TOKEN = "github_token"
         const val GITHUB_USERNAME = "github_username"
+        const val LINE_SPACING = "line_spacing"
+        const val PARA_SPACING = "para_spacing"
+        const val TEXT_INDENT = "text_indent"
+        const val TRANSLATE_API_URL = "translate_api_url"
+        const val TRANSLATE_API_KEY = "translate_api_key"
+        const val DICTIONARY_API_URL = "dictionary_api_url"
+        const val DICTIONARY_API_KEY = "dictionary_api_key"
+        const val TTS_VOICE_NAME = "tts_voice_name"
+        const val TTS_RATE = "tts_rate"
+        const val TTS_VOLUME = "tts_volume"
+        const val CSC_MODE = "csc_mode"
+        const val CSC_THRESHOLD = "csc_threshold"
     }
 
     private fun loadSettings() {
@@ -266,6 +332,18 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
         autoStartSharing = prefs.getBoolean(PrefKeys.AUTO_START_SHARING, false)
         githubToken = prefs.getString(PrefKeys.GITHUB_TOKEN, null)
         githubUsername = prefs.getString(PrefKeys.GITHUB_USERNAME, null)
+        lineSpacing = prefs.getFloat(PrefKeys.LINE_SPACING, 1.5f).coerceIn(1.0f, 3.0f)
+        paraSpacing = prefs.getFloat(PrefKeys.PARA_SPACING, 0.5f).coerceIn(0.0f, 2.0f)
+        textIndent = prefs.getInt(PrefKeys.TEXT_INDENT, 2).coerceIn(0, 4)
+        translateApiUrl = prefs.getString(PrefKeys.TRANSLATE_API_URL, "") ?: ""
+        translateApiKey = prefs.getString(PrefKeys.TRANSLATE_API_KEY, "") ?: ""
+        dictionaryApiUrl = prefs.getString(PrefKeys.DICTIONARY_API_URL, "") ?: ""
+        dictionaryApiKey = prefs.getString(PrefKeys.DICTIONARY_API_KEY, "") ?: ""
+        ttsVoiceName = prefs.getString(PrefKeys.TTS_VOICE_NAME, "zh-CN-XiaoxiaoNeural") ?: "zh-CN-XiaoxiaoNeural"
+        ttsRate = prefs.getInt(PrefKeys.TTS_RATE, 0)
+        ttsVolume = prefs.getInt(PrefKeys.TTS_VOLUME, 0)
+        cscMode = prefs.getString(PrefKeys.CSC_MODE, "none") ?: "none"
+        cscThreshold = prefs.getString(PrefKeys.CSC_THRESHOLD, "standard") ?: "standard"
     }
 
     private fun persistSettings() {
@@ -283,6 +361,18 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
             .putFloat(PrefKeys.BG_IMAGE_ALPHA, readerBgImageAlpha)
             .putString(PrefKeys.LANGUAGE, readerLanguage)
             .putBoolean(PrefKeys.AUTO_START_SHARING, autoStartSharing)
+            .putFloat(PrefKeys.LINE_SPACING, lineSpacing)
+            .putFloat(PrefKeys.PARA_SPACING, paraSpacing)
+            .putInt(PrefKeys.TEXT_INDENT, textIndent)
+            .putString(PrefKeys.TRANSLATE_API_URL, translateApiUrl)
+            .putString(PrefKeys.TRANSLATE_API_KEY, translateApiKey)
+            .putString(PrefKeys.DICTIONARY_API_URL, dictionaryApiUrl)
+            .putString(PrefKeys.DICTIONARY_API_KEY, dictionaryApiKey)
+            .putString(PrefKeys.TTS_VOICE_NAME, ttsVoiceName)
+            .putInt(PrefKeys.TTS_RATE, ttsRate)
+            .putInt(PrefKeys.TTS_VOLUME, ttsVolume)
+            .putString(PrefKeys.CSC_MODE, cscMode)
+            .putString(PrefKeys.CSC_THRESHOLD, cscThreshold)
             .apply()
     }
 
@@ -745,6 +835,197 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
         readerLanguage = code
         I18n.setLanguage(code)
         persistSettings()
+    }
+
+    fun updateLineSpacing(value: Float) {
+        lineSpacing = value.coerceIn(1.0f, 3.0f)
+        persistSettings()
+    }
+
+    fun updateParaSpacing(value: Float) {
+        paraSpacing = value.coerceIn(0.0f, 2.0f)
+        persistSettings()
+    }
+
+    fun updateTextIndent(value: Int) {
+        textIndent = value.coerceIn(0, 4)
+        persistSettings()
+    }
+
+    fun updateTranslateApiUrl(value: String) {
+        translateApiUrl = value
+        persistSettings()
+    }
+
+    fun updateTranslateApiKey(value: String) {
+        translateApiKey = value
+        persistSettings()
+    }
+
+    fun updateDictionaryApiUrl(value: String) {
+        dictionaryApiUrl = value
+        persistSettings()
+    }
+
+    fun updateDictionaryApiKey(value: String) {
+        dictionaryApiKey = value
+        persistSettings()
+    }
+
+    fun updateTtsVoiceName(value: String) {
+        ttsVoiceName = value
+        persistSettings()
+    }
+
+    fun updateTtsRate(value: Int) {
+        ttsRate = value
+        persistSettings()
+    }
+
+    fun updateTtsVolume(value: Int) {
+        ttsVolume = value
+        persistSettings()
+    }
+
+    fun updateCscMode(value: String) {
+        cscMode = value
+        persistSettings()
+        // If enabling CSC, try to load model
+        if (value != "none" && !cscEngine.isReady && !cscModelLoading) {
+            loadCscModel()
+        }
+        // If model is ready and mode changed, re-run check on current chapter
+        if (cscEngine.isReady && value != "none") {
+            runCscCheckOnCurrentChapter()
+        }
+        if (value == "none") {
+            cscCorrections = emptyList()
+        }
+    }
+
+    fun updateCscThreshold(value: String) {
+        cscThreshold = value
+        persistSettings()
+        // Re-run check with new threshold if active
+        if (cscMode != "none" && cscEngine.isReady) {
+            runCscCheckOnCurrentChapter()
+        }
+    }
+
+    private fun loadCscModel() {
+        val dataDir = context.filesDir.absolutePath
+        if (!CscEngine.isModelAvailable(dataDir)) {
+            android.util.Log.i("CSC", "Model not downloaded yet")
+            return
+        }
+        cscModelLoading = true
+        viewModelScope.launch(Dispatchers.IO) {
+            val result = cscEngine.load(dataDir)
+            withContext(Dispatchers.Main) {
+                cscModelLoading = false
+                cscModelReady = result.isSuccess
+                if (result.isSuccess && cscMode != "none") {
+                    runCscCheckOnCurrentChapter()
+                }
+                result.exceptionOrNull()?.let {
+                    android.util.Log.e("CSC", "Failed to load model", it)
+                }
+            }
+        }
+    }
+
+    fun downloadCscModel() {
+        val dataDir = context.filesDir.absolutePath
+        val modelDir = CscEngine.modelDir(dataDir)
+        if (!modelDir.exists()) modelDir.mkdirs()
+        cscModelLoading = true
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                downloadFile(CscEngine.MODEL_URL, CscEngine.modelPath(dataDir))
+                downloadFile(CscEngine.VOCAB_URL, CscEngine.vocabPath(dataDir))
+                withContext(Dispatchers.Main) {
+                    loadCscModel()
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    cscModelLoading = false
+                    android.util.Log.e("CSC", "Download failed", e)
+                }
+            }
+        }
+    }
+
+    private fun downloadFile(url: String, dest: File) {
+        val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
+        try {
+            conn.connectTimeout = 30000
+            conn.readTimeout = 60000
+            conn.inputStream.use { input ->
+                FileOutputStream(dest).use { output ->
+                    input.copyTo(output)
+                }
+            }
+        } finally {
+            conn.disconnect()
+        }
+    }
+
+    private fun runCscCheckOnCurrentChapter() {
+        val book = currentBook ?: return
+        val chapter = book.chapters.getOrNull(currentChapter) ?: return
+        val threshold = when (cscThreshold) {
+            "strict" -> 0.95f
+            "standard" -> 0.90f
+            "loose" -> 0.80f
+            else -> 0.90f
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            val fullText = chapter.blocks
+                .mapNotNull { block ->
+                    when (block) {
+                        is ContentBlock.Paragraph -> block.spans.joinToString("") { it.text }
+                        is ContentBlock.Heading -> block.spans.joinToString("") { it.text }
+                        else -> null
+                    }
+                }
+                .joinToString("\n")
+            val results = cscEngine.check(fullText, threshold)
+            withContext(Dispatchers.Main) {
+                cscCorrections = results
+            }
+        }
+    }
+
+    // ── TTS playback controls ──
+
+    fun ttsStartPlayback() {
+        val book = currentBook ?: return
+        val chapter = book.chapters.getOrNull(currentChapter) ?: return
+        ttsManager.voiceName = ttsVoiceName
+        ttsManager.rate = ttsRate
+        ttsManager.volume = ttsVolume
+        showTtsBar = true
+        ttsManager.start(chapter.blocks)
+    }
+
+    fun ttsStopPlayback() {
+        ttsManager.stop()
+    }
+
+    fun ttsTogglePause() {
+        ttsManager.togglePause()
+    }
+
+    fun ttsToggleBar() {
+        showTtsBar = !showTtsBar
+        if (!showTtsBar) {
+            ttsManager.stop()
+        }
+    }
+
+    fun ttsCloseTtsBar() {
+        ttsManager.stop()
+        showTtsBar = false
     }
 
     fun closeBook() {
@@ -1336,6 +1617,8 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
 
     override fun onCleared() {
         super.onCleared()
+        ttsManager.destroy()
+        cscEngine.release()
         discoveryPollingJob?.cancel()
         viewModelScope.launch(Dispatchers.IO) {
             RustBridge.stopDiscoveryListener()

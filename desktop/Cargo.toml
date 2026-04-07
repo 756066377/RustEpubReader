@@ -23,6 +23,11 @@ open = "5"
 urlencoding = "2"
 msedge-tts = "0.3"
 rodio = "0.20"
+openssl = { version = "0.10", features = ["vendored"], optional = true }
+
+[features]
+default = []
+vendored-openssl = ["openssl/vendored"]
 
 [target.'cfg(windows)'.build-dependencies]
 winres = "0.1"

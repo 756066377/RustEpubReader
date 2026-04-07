@@ -93,6 +93,12 @@ dependencies {
     // Coil for image loading
     implementation("io.coil-kt:coil-compose:2.7.0")
 
+    // OkHttp for Edge TTS WebSocket
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+
+    // ONNX Runtime for CSC model inference
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.17.0")
+
     // Realistic page curl animation (vendored source for customization)
     implementation(project(":pagecurl"))
 
