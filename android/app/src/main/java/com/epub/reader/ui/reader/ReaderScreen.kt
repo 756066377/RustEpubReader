@@ -620,7 +620,24 @@ fun ReaderScreen(
             visible = selectionMenuVisible,
             selectionRect = selectionRect,
             isDarkMode = isDarkMode,
-            onAction = { action ->
+            onAction = { action, color ->
+                selectionMenuVisible = false
+                
+                if (action == SelectionAction.HIGHLIGHT || action == SelectionAction.NOTE) {
+                    selectionMenuVisible = false
+                    // NOTE 仍然需要先选一段假占位区域
+                    if (action == SelectionAction.HIGHLIGHT) {
+                        onAddHighlight(currentChapter, 0, 0, 0, 10, color ?: "Yellow")
+                    } else if (action == SelectionAction.NOTE) {
+                        // In the future this should gather precise text instead of clipboard, 
+                        // but since the mock requires offset context we bypass clipboard for visual polish
+                        currentSelectedText = "[$currentChapter: 0-10] ${clipboardManager.getText()?.text ?: ""}"
+                        activeSelectionAction = SelectionAction.NOTE
+                    }
+                    return@SelectionFloatingMenu
+                }
+
+                // ONLY trigger native copy fallback when dictionary/translate/correct/copy explicitly need text
                 selectionCopyCallback?.invoke()
                 val textFromClipboard = clipboardManager.getText()?.text ?: ""
                 currentSelectedText = textFromClipboard
@@ -630,12 +647,8 @@ fun ReaderScreen(
                     SelectionAction.COPY -> {
                         // Already copied to clipboard
                     }
-                    SelectionAction.HIGHLIGHT -> {
-                        // TODO: 需精细化 offset。暂用 0 传给 RustBridge 占位
-                        onAddHighlight(currentChapter, 0, 0, 0, 10, "Yellow")
-                    }
-                    SelectionAction.NOTE -> {
-                        activeSelectionAction = SelectionAction.NOTE
+                    SelectionAction.HIGHLIGHT, SelectionAction.NOTE -> {
+                        // Handled above
                     }
                     SelectionAction.DICTIONARY -> {
                         activeSelectionAction = SelectionAction.DICTIONARY

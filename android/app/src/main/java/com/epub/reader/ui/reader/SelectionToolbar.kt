@@ -75,9 +75,11 @@ fun SelectionFloatingMenu(
     visible: Boolean,
     selectionRect: Rect,
     isDarkMode: Boolean,
-    onAction: (SelectionAction) -> Unit,
+    onAction: (SelectionAction, String?) -> Unit,
     onDismiss: () -> Unit
 ) {
+    var showColorPicker by remember(visible) { mutableStateOf(false) }
+
     AnimatedVisibility(
         visible = visible,
         enter = fadeIn() + scaleIn(initialScale = 0.8f),
@@ -107,53 +109,69 @@ fun SelectionFloatingMenu(
                 color = menuBg,
                 tonalElevation = 4.dp
             ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(2.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    SelectionMenuItem(
-                        icon = Icons.Default.ContentCopy,
-                        label = I18n.t("selection.copy"),
-                        tint = iconClr,
-                        textColor = textClr,
-                        onClick = { onAction(SelectionAction.COPY) }
-                    )
-                    SelectionMenuItem(
-                        icon = Icons.Default.Highlight,
-                        label = I18n.t("selection.highlight"),
-                        tint = Color(0xFFFFC107),
-                        textColor = textClr,
-                        onClick = { onAction(SelectionAction.HIGHLIGHT) }
-                    )
-                    SelectionMenuItem(
-                        icon = Icons.Filled.StickyNote2,
-                        label = I18n.t("selection.note"),
-                        tint = Color(0xFF66BB6A),
-                        textColor = textClr,
-                        onClick = { onAction(SelectionAction.NOTE) }
-                    )
-                    SelectionMenuItem(
-                        icon = Icons.Filled.MenuBook,
-                        label = I18n.t("selection.dictionary"),
-                        tint = iconClr,
-                        textColor = textClr,
-                        onClick = { onAction(SelectionAction.DICTIONARY) }
-                    )
-                    SelectionMenuItem(
-                        icon = Icons.Default.Translate,
-                        label = I18n.t("selection.translate"),
-                        tint = Color(0xFF42A5F5),
-                        textColor = textClr,
-                        onClick = { onAction(SelectionAction.TRANSLATE) }
-                    )
-                    SelectionMenuItem(
-                        icon = Icons.Default.Edit,
-                        label = I18n.t("selection.correct"),
-                        tint = Color(0xFFEF5350),
-                        textColor = textClr,
-                        onClick = { onAction(SelectionAction.CORRECT) }
-                    )
+                if (showColorPicker) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        IconButton(onClick = { showColorPicker = false }) {
+                            Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = iconClr)
+                        }
+                        ColorBubble(color = Color(0xFFFFC107)) { onAction(SelectionAction.HIGHLIGHT, "Yellow") }
+                        ColorBubble(color = Color(0xFF66BB6A)) { onAction(SelectionAction.HIGHLIGHT, "Green") }
+                        ColorBubble(color = Color(0xFF42A5F5)) { onAction(SelectionAction.HIGHLIGHT, "Blue") }
+                        ColorBubble(color = Color(0xFFEF5350)) { onAction(SelectionAction.HIGHLIGHT, "Pink") }
+                    }
+                } else {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(2.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        SelectionMenuItem(
+                            icon = Icons.Default.ContentCopy,
+                            label = I18n.t("selection.copy"),
+                            tint = iconClr,
+                            textColor = textClr,
+                            onClick = { onAction(SelectionAction.COPY, null) }
+                        )
+                        SelectionMenuItem(
+                            icon = Icons.Default.Highlight,
+                            label = I18n.t("selection.highlight"),
+                            tint = Color(0xFFFFC107),
+                            textColor = textClr,
+                            onClick = { showColorPicker = true }
+                        )
+                        SelectionMenuItem(
+                            icon = Icons.Filled.StickyNote2,
+                            label = I18n.t("selection.note"),
+                            tint = Color(0xFF66BB6A),
+                            textColor = textClr,
+                            onClick = { onAction(SelectionAction.NOTE, null) }
+                        )
+                        SelectionMenuItem(
+                            icon = Icons.Filled.MenuBook,
+                            label = I18n.t("selection.dictionary"),
+                            tint = iconClr,
+                            textColor = textClr,
+                            onClick = { onAction(SelectionAction.DICTIONARY, null) }
+                        )
+                        SelectionMenuItem(
+                            icon = Icons.Default.Translate,
+                            label = I18n.t("selection.translate"),
+                            tint = Color(0xFF42A5F5),
+                            textColor = textClr,
+                            onClick = { onAction(SelectionAction.TRANSLATE, null) }
+                        )
+                        SelectionMenuItem(
+                            icon = Icons.Default.Edit,
+                            label = I18n.t("selection.correct"),
+                            tint = Color(0xFFEF5350),
+                            textColor = textClr,
+                            onClick = { onAction(SelectionAction.CORRECT, null) }
+                        )
+                    }
                 }
             }
             }
@@ -189,4 +207,14 @@ private fun SelectionMenuItem(
             maxLines = 1
         )
     }
+}
+
+@Composable
+private fun ColorBubble(color: Color, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .size(32.dp)
+            .background(color, androidx.compose.foundation.shape.CircleShape)
+            .clickable(onClick = onClick)
+    )
 }
