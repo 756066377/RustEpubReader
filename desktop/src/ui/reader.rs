@@ -651,24 +651,26 @@ impl ReaderApp {
                         } else {
                             format!("{} / {}", self.current_page + 1, self.total_pages)
                         };
-                        ui.painter().text(
-                            egui::pos2(page_rect.right() - 20.0, page_rect.top() + 8.0),
-                            egui::Align2::RIGHT_TOP,
-                            page_info,
-                            FontId::proportional(13.0),
-                            Color32::GRAY,
-                        );
-                        ui.painter().text(
-                            egui::pos2(page_rect.right() - 20.0, page_rect.bottom() - 8.0),
-                            egui::Align2::RIGHT_BOTTOM,
-                            self.i18n.tf2(
-                                "reader.chapter_indicator",
-                                &(self.current_chapter + 1).to_string(),
-                                &total_ch.to_string(),
-                            ),
-                            FontId::proportional(13.0),
-                            Color32::GRAY,
-                        );
+                        if self.reader_toolbar_visible {
+                            ui.painter().text(
+                                egui::pos2(page_rect.right() - 20.0, page_rect.top() + 8.0),
+                                egui::Align2::RIGHT_TOP,
+                                page_info,
+                                FontId::proportional(13.0),
+                                Color32::GRAY,
+                            );
+                            ui.painter().text(
+                                egui::pos2(page_rect.right() - 20.0, page_rect.bottom() - 8.0),
+                                egui::Align2::RIGHT_BOTTOM,
+                                self.i18n.tf2(
+                                    "reader.chapter_indicator",
+                                    &(self.current_chapter + 1).to_string(),
+                                    &total_ch.to_string(),
+                                ),
+                                FontId::proportional(13.0),
+                                Color32::GRAY,
+                            );
+                        }
                     } else {
                         let is_animating = self.reader_page_animation != "None"
                             && self.page_anim_progress < 1.0
@@ -869,24 +871,26 @@ impl ReaderApp {
                                 &highlight_ranges,
                             );
                         }
-                        ui.painter().text(
-                            egui::pos2(page_rect.right() - 20.0, page_rect.top() + 8.0),
-                            egui::Align2::RIGHT_TOP,
-                            format!("{} / {}", self.current_page + 1, self.total_pages),
-                            FontId::proportional(13.0),
-                            Color32::GRAY,
-                        );
-                        ui.painter().text(
-                            egui::pos2(page_rect.right() - 20.0, page_rect.bottom() - 8.0),
-                            egui::Align2::RIGHT_BOTTOM,
-                            self.i18n.tf2(
-                                "reader.chapter_indicator",
-                                &(self.current_chapter + 1).to_string(),
-                                &total_ch.to_string(),
-                            ),
-                            FontId::proportional(13.0),
-                            Color32::GRAY,
-                        );
+                        if self.reader_toolbar_visible {
+                            ui.painter().text(
+                                egui::pos2(page_rect.right() - 20.0, page_rect.top() + 8.0),
+                                egui::Align2::RIGHT_TOP,
+                                format!("{} / {}", self.current_page + 1, self.total_pages),
+                                FontId::proportional(13.0),
+                                Color32::GRAY,
+                            );
+                            ui.painter().text(
+                                egui::pos2(page_rect.right() - 20.0, page_rect.bottom() - 8.0),
+                                egui::Align2::RIGHT_BOTTOM,
+                                self.i18n.tf2(
+                                    "reader.chapter_indicator",
+                                    &(self.current_chapter + 1).to_string(),
+                                    &total_ch.to_string(),
+                                ),
+                                FontId::proportional(13.0),
+                                Color32::GRAY,
+                            );
+                        }
                     }
                     if !self.show_sharing_panel
                         && !self.show_stats

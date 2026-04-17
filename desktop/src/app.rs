@@ -911,6 +911,7 @@ pub struct ReaderApp {
     pub show_settings: bool,
     pub show_toc: bool,
     pub reader_toolbar_visible: bool,
+    pub reader_window_level: egui::WindowLevel,
     pub scroll_to_top: bool,
     pub error_msg: Option<String>,
     pub view: AppView,
@@ -1192,6 +1193,7 @@ impl Default for ReaderApp {
             show_settings: false,
             show_toc: true,
             reader_toolbar_visible: default_reader_toolbar_visible(),
+            reader_window_level: egui::WindowLevel::Normal,
             scroll_to_top: false,
             error_msg: None,
             view: AppView::Library,
@@ -2061,6 +2063,19 @@ impl ReaderApp {
         }
     }
 
+    fn sync_reader_window_level(&mut self, ctx: &egui::Context) {
+        let desired = if self.view == AppView::Reader {
+            egui::WindowLevel::AlwaysOnTop
+        } else {
+            egui::WindowLevel::Normal
+        };
+
+        if self.reader_window_level != desired {
+            self.reader_window_level = desired;
+            ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(desired));
+        }
+    }
+
     fn handle_root_viewport_resize(&self, ctx: &egui::Context) {
         const BORDER: f32 = 6.0;
 
@@ -2287,6 +2302,7 @@ impl eframe::App for ReaderApp {
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.last_egui_ctx = Some(ctx.clone());
+        self.sync_reader_window_level(ctx);
         self.handle_root_viewport_resize(ctx);
         self.handle_reader_shortcuts(ctx);
         self.poll_boss_key_capture(ctx);
