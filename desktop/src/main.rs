@@ -153,6 +153,7 @@ fn main() -> eframe::Result {
         .with_inner_size([1200.0, 800.0])
         .with_min_inner_size([600.0, 400.0])
         .with_resizable(true)
+        .with_transparent(true)
         .with_decorations(false)
         .with_taskbar(false);
     let viewport = if let Some(icon) = load_app_icon() {

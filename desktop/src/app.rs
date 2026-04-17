@@ -2043,13 +2043,21 @@ impl ReaderApp {
 }
 
 impl ReaderApp {
+    fn set_reader_chrome_visible(&mut self, visible: bool) {
+        self.reader_toolbar_visible = visible;
+        self.show_toc = visible;
+        if self.show_toc {
+            self.scroll_toc_to_current = true;
+        }
+    }
+
     fn handle_reader_shortcuts(&mut self, ctx: &egui::Context) {
         if self.view != AppView::Reader || self.boss_key_capturing {
             return;
         }
 
         if ctx.input(|i| i.key_pressed(egui::Key::F2)) {
-            self.reader_toolbar_visible = !self.reader_toolbar_visible;
+            self.set_reader_chrome_visible(!self.reader_toolbar_visible);
         }
     }
 
@@ -2273,6 +2281,10 @@ impl Drop for ReaderApp {
 }
 
 impl eframe::App for ReaderApp {
+    fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
+        egui::Color32::TRANSPARENT.to_normalized_gamma_f32()
+    }
+
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.last_egui_ctx = Some(ctx.clone());
         self.handle_root_viewport_resize(ctx);

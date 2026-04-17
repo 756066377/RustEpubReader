@@ -61,10 +61,7 @@ impl ReaderApp {
                     .on_hover_text(&toc_tip)
                     .clicked()
                 {
-                    self.show_toc = !self.show_toc;
-                    if self.show_toc {
-                        self.scroll_toc_to_current = true;
-                    }
+                    self.set_reader_chrome_visible(!self.show_toc);
                 }
 
                 let mode_tip = if self.scroll_mode {
