@@ -320,8 +320,8 @@ impl ReaderApp {
                 .size(12.0)
                 .color(Color32::from_gray(140)),
         );
-        let shortcut_label = if self.boss_key_shortcut.is_empty() {
-            self.i18n.t("settings.boss_key_disabled")
+        let shortcut_label: String = if self.boss_key_shortcut.is_empty() {
+            self.i18n.t("settings.boss_key_disabled").to_string()
         } else {
             self.boss_key_shortcut.clone()
         };

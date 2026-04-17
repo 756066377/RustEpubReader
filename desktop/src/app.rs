@@ -232,21 +232,21 @@ fn boss_key_token_to_vk(token: &str) -> Option<u32> {
         VK_NEXT, VK_PRIOR, VK_RETURN, VK_RIGHT, VK_SPACE, VK_TAB, VK_UP,
     };
     match token {
-        "Esc" => Some(VK_ESCAPE),
-        "Space" => Some(VK_SPACE),
-        "Enter" => Some(VK_RETURN),
-        "Tab" => Some(VK_TAB),
-        "Backspace" => Some(VK_BACK),
-        "Insert" => Some(VK_INSERT),
-        "Delete" => Some(VK_DELETE),
-        "Home" => Some(VK_HOME),
-        "End" => Some(VK_END),
-        "PageUp" => Some(VK_PRIOR),
-        "PageDown" => Some(VK_NEXT),
-        "Left" => Some(VK_LEFT),
-        "Right" => Some(VK_RIGHT),
-        "Up" => Some(VK_UP),
-        "Down" => Some(VK_DOWN),
+        "Esc" => Some(VK_ESCAPE.into()),
+        "Space" => Some(VK_SPACE.into()),
+        "Enter" => Some(VK_RETURN.into()),
+        "Tab" => Some(VK_TAB.into()),
+        "Backspace" => Some(VK_BACK.into()),
+        "Insert" => Some(VK_INSERT.into()),
+        "Delete" => Some(VK_DELETE.into()),
+        "Home" => Some(VK_HOME.into()),
+        "End" => Some(VK_END.into()),
+        "PageUp" => Some(VK_PRIOR.into()),
+        "PageDown" => Some(VK_NEXT.into()),
+        "Left" => Some(VK_LEFT.into()),
+        "Right" => Some(VK_RIGHT.into()),
+        "Up" => Some(VK_UP.into()),
+        "Down" => Some(VK_DOWN.into()),
         _ => {
             if token.len() == 1 {
                 return token.chars().next().map(|c| c as u32);
@@ -255,7 +255,7 @@ fn boss_key_token_to_vk(token: &str) -> Option<u32> {
             if !(1..=12).contains(&n) {
                 return None;
             }
-            Some(VK_F1 + (n - 1))
+            Some(u32::from(VK_F1) + (n - 1))
         }
     }
 }
@@ -286,8 +286,9 @@ fn boss_key_modifiers(spec: &BossHotkeySpec) -> u32 {
 fn start_boss_hotkey_runtime(spec: &BossHotkeySpec) -> Result<BossHotkeyRuntime, ()> {
     use std::sync::mpsc;
     use std::time::Duration;
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{RegisterHotKey, UnregisterHotKey};
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        GetMessageW, PeekMessageW, RegisterHotKey, UnregisterHotKey, MSG, PM_NOREMOVE, WM_HOTKEY,
+        GetMessageW, PeekMessageW, MSG, PM_NOREMOVE, WM_HOTKEY,
     };
 
     const BOSS_HOTKEY_ID: i32 = 0x5245;

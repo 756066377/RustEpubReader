@@ -47,7 +47,6 @@ macro_rules! dbg_log {
         $crate::sharing::share_dbg_log(&format!($($arg)*));
     };
 }
-pub(crate) use dbg_log;
 
 // ── Module declarations ──
 
