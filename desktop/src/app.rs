@@ -2043,7 +2043,7 @@ impl ReaderApp {
 }
 
 impl ReaderApp {
-    fn set_reader_chrome_visible(&mut self, visible: bool) {
+    pub(crate) fn set_reader_chrome_visible(&mut self, visible: bool) {
         self.reader_toolbar_visible = visible;
         self.show_toc = visible;
         if self.show_toc {
