@@ -19,6 +19,163 @@ use reader_core::sharing::{start_listener, DiscoveredPeer, PeerStore};
 
 type FontDiscoveryResult = Arc<Mutex<Option<(Vec<String>, HashMap<String, String>)>>>;
 
+#[derive(Clone, Debug)]
+struct BossHotkeySpec {
+    normalized: String,
+    ctrl: bool,
+    alt: bool,
+    shift: bool,
+    win: bool,
+    key_token: String,
+}
+
+#[cfg(target_os = "windows")]
+struct BossHotkeyRuntime {
+    stop: Arc<AtomicBool>,
+    worker: Option<std::thread::JoinHandle<()>>,
+}
+
+fn default_boss_key() -> String {
+    "Ctrl+Shift+H".to_string()
+}
+
+fn parse_boss_hotkey(input: &str) -> Option<BossHotkeySpec> {
+    let mut ctrl = false;
+    let mut alt = false;
+    let mut shift = false;
+    let mut win = false;
+    let mut key_token: Option<String> = None;
+
+    for raw in input.split('+') {
+        let token = raw.trim();
+        if token.is_empty() {
+            continue;
+        }
+        let up = token.to_ascii_uppercase();
+        match up.as_str() {
+            "CTRL" | "CONTROL" => ctrl = true,
+            "ALT" => alt = true,
+            "SHIFT" => shift = true,
+            "WIN" | "WINDOWS" | "META" => win = true,
+            _ => {
+                if key_token.is_some() {
+                    return None;
+                }
+                let is_single =
+                    up.len() == 1 && up.chars().next().is_some_and(|c| c.is_ascii_alphanumeric());
+                let is_fn = up
+                    .strip_prefix('F')
+                    .and_then(|s| s.parse::<u8>().ok())
+                    .is_some_and(|n| (1..=12).contains(&n));
+                if !is_single && !is_fn {
+                    return None;
+                }
+                key_token = Some(up);
+            }
+        }
+    }
+
+    let key_token = key_token?;
+    if !(ctrl || alt || shift || win) {
+        return None;
+    }
+    let mut parts: Vec<&str> = Vec::new();
+    if ctrl {
+        parts.push("Ctrl");
+    }
+    if alt {
+        parts.push("Alt");
+    }
+    if shift {
+        parts.push("Shift");
+    }
+    if win {
+        parts.push("Win");
+    }
+    parts.push(&key_token);
+
+    Some(BossHotkeySpec {
+        normalized: parts.join("+"),
+        ctrl,
+        alt,
+        shift,
+        win,
+        key_token,
+    })
+}
+
+#[cfg(target_os = "windows")]
+fn boss_key_token_to_vk(token: &str) -> Option<i32> {
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::VK_F1;
+    if token.len() == 1 {
+        return token.chars().next().map(|c| c as i32);
+    }
+    let n = token.strip_prefix('F')?.parse::<i32>().ok()?;
+    if !(1..=12).contains(&n) {
+        return None;
+    }
+    Some(VK_F1 as i32 + (n - 1))
+}
+
+#[cfg(target_os = "windows")]
+fn key_down(vk: i32) -> bool {
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
+    unsafe { (GetAsyncKeyState(vk) as u16 & 0x8000) != 0 }
+}
+
+#[cfg(target_os = "windows")]
+fn current_process_main_window() -> Option<isize> {
+    use windows_sys::Win32::Foundation::{BOOL, HWND, LPARAM};
+    use windows_sys::Win32::System::Threading::GetCurrentProcessId;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        EnumWindows, GetWindow, GetWindowThreadProcessId, GW_OWNER,
+    };
+
+    struct Search {
+        pid: u32,
+        hwnd: HWND,
+    }
+
+    unsafe extern "system" fn enum_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
+        let search = &mut *(lparam as *mut Search);
+        let mut pid = 0u32;
+        GetWindowThreadProcessId(hwnd, &mut pid);
+        if pid == search.pid && GetWindow(hwnd, GW_OWNER) == 0 {
+            search.hwnd = hwnd;
+            return 0;
+        }
+        1
+    }
+
+    let mut search = Search {
+        pid: unsafe { GetCurrentProcessId() },
+        hwnd: 0,
+    };
+    unsafe {
+        EnumWindows(Some(enum_proc), &mut search as *mut Search as isize);
+    }
+    (search.hwnd != 0).then_some(search.hwnd)
+}
+
+#[cfg(target_os = "windows")]
+fn toggle_main_window_visibility() {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        IsWindowVisible, SetForegroundWindow, ShowWindow, SW_HIDE, SW_RESTORE, SW_SHOW,
+    };
+
+    if let Some(hwnd) = current_process_main_window() {
+        unsafe {
+            if IsWindowVisible(hwnd) != 0 {
+                ShowWindow(hwnd, SW_HIDE);
+            } else {
+                ShowWindow(hwnd, SW_SHOW);
+                ShowWindow(hwnd, SW_RESTORE);
+                SetForegroundWindow(hwnd);
+            }
+        }
+    }
+}
+
 /// Push a debug log entry from anywhere (including background threads).
 /// Writes to both the in-memory feedback_logs buffer and stderr (when debug logging is enabled).
 pub fn dbg_log(logs: &Arc<Mutex<Vec<String>>>, msg: impl AsRef<str>) {
@@ -304,6 +461,8 @@ struct AppSettings {
     dictionary_api_url: String,
     #[serde(default)]
     dictionary_api_key: String,
+    #[serde(default = "default_boss_key")]
+    boss_key_shortcut: String,
     #[serde(default)]
     csc_mode: reader_core::csc::CorrectionMode,
     #[serde(default)]
@@ -373,6 +532,7 @@ impl AppSettings {
             translate_api_key: app.translate_api_key.clone(),
             dictionary_api_url: app.dictionary_api_url.clone(),
             dictionary_api_key: app.dictionary_api_key.clone(),
+            boss_key_shortcut: app.boss_key_shortcut.clone(),
             csc_mode: app.csc_mode.clone(),
             csc_threshold: app.csc_threshold.clone(),
             github_username: app.github_username.clone(),
@@ -407,6 +567,8 @@ impl AppSettings {
         app.translate_api_key = self.translate_api_key.clone();
         app.dictionary_api_url = self.dictionary_api_url.clone();
         app.dictionary_api_key = self.dictionary_api_key.clone();
+        app.boss_key_shortcut = self.boss_key_shortcut.clone();
+        app.boss_key_input = app.boss_key_shortcut.clone();
         app.csc_mode = self.csc_mode.clone();
         app.csc_threshold = self.csc_threshold.clone();
         app.github_username = self.github_username.clone();
@@ -619,6 +781,11 @@ pub struct ReaderApp {
     pub translate_api_key: String,
     pub dictionary_api_url: String,
     pub dictionary_api_key: String,
+    pub boss_key_shortcut: String,
+    pub boss_key_input: String,
+    pub boss_key_status: String,
+    #[cfg(target_os = "windows")]
+    boss_hotkey_runtime: Option<BossHotkeyRuntime>,
 
     // ── CSC (Chinese Spelling Correction) ──
     pub csc_mode: reader_core::csc::CorrectionMode,
@@ -878,6 +1045,11 @@ impl Default for ReaderApp {
             translate_api_key: String::new(),
             dictionary_api_url: String::new(),
             dictionary_api_key: String::new(),
+            boss_key_shortcut: default_boss_key(),
+            boss_key_input: default_boss_key(),
+            boss_key_status: String::new(),
+            #[cfg(target_os = "windows")]
+            boss_hotkey_runtime: None,
             // CSC
             csc_mode: reader_core::csc::CorrectionMode::None,
             csc_threshold: reader_core::csc::CscThreshold::Standard,
@@ -954,6 +1126,7 @@ impl Default for ReaderApp {
             app.push_feedback_log("[Init] auto-starting sharing server");
             app.start_sharing_server();
         }
+        app.rebind_boss_hotkey();
         app.push_feedback_log(format!(
             "[Init] app initialized (data_dir={})",
             app.data_dir
@@ -1614,6 +1787,87 @@ impl ReaderApp {
         let [r, g, b, _] = self.reader_bg_color.to_array();
         let alpha = (self.reader_bg_opacity * 255.0).round() as u8;
         Color32::from_rgba_unmultiplied(r, g, b, alpha)
+    }
+
+    pub fn apply_boss_key_from_input(&mut self) {
+        let Some(spec) = parse_boss_hotkey(&self.boss_key_input) else {
+            self.boss_key_status = self.i18n.t("settings.boss_key_invalid").to_string();
+            return;
+        };
+        self.boss_key_shortcut = spec.normalized;
+        self.boss_key_input = self.boss_key_shortcut.clone();
+        self.rebind_boss_hotkey();
+    }
+
+    fn rebind_boss_hotkey(&mut self) {
+        self.stop_boss_hotkey_runtime();
+        let Some(spec) = parse_boss_hotkey(&self.boss_key_shortcut) else {
+            self.boss_key_status = self.i18n.t("settings.boss_key_invalid").to_string();
+            return;
+        };
+
+        #[cfg(target_os = "windows")]
+        {
+            use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+                VK_CONTROL, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT,
+            };
+
+            let Some(main_vk) = boss_key_token_to_vk(&spec.key_token) else {
+                self.boss_key_status = self.i18n.t("settings.boss_key_invalid").to_string();
+                return;
+            };
+
+            let stop = Arc::new(AtomicBool::new(false));
+            let stop_worker = stop.clone();
+            let ctrl = spec.ctrl;
+            let alt = spec.alt;
+            let shift = spec.shift;
+            let win = spec.win;
+            let worker = std::thread::spawn(move || {
+                let mut was_down = false;
+                while !stop_worker.load(Ordering::Relaxed) {
+                    let ctrl_down = !ctrl || key_down(VK_CONTROL as i32);
+                    let alt_down = !alt || key_down(VK_MENU as i32);
+                    let shift_down = !shift || key_down(VK_SHIFT as i32);
+                    let win_down = !win || key_down(VK_LWIN as i32) || key_down(VK_RWIN as i32);
+                    let hotkey_down =
+                        ctrl_down && alt_down && shift_down && win_down && key_down(main_vk);
+                    if hotkey_down && !was_down {
+                        toggle_main_window_visibility();
+                    }
+                    was_down = hotkey_down;
+                    std::thread::sleep(std::time::Duration::from_millis(25));
+                }
+            });
+
+            self.boss_hotkey_runtime = Some(BossHotkeyRuntime {
+                stop,
+                worker: Some(worker),
+            });
+            self.boss_key_status = self.i18n.tf1("settings.boss_key_active", &spec.normalized);
+            return;
+        }
+
+        #[cfg(not(target_os = "windows"))]
+        {
+            self.boss_key_status = self.i18n.t("settings.boss_key_unsupported").to_string();
+        }
+    }
+
+    fn stop_boss_hotkey_runtime(&mut self) {
+        #[cfg(target_os = "windows")]
+        if let Some(mut runtime) = self.boss_hotkey_runtime.take() {
+            runtime.stop.store(true, Ordering::Relaxed);
+            if let Some(worker) = runtime.worker.take() {
+                let _ = worker.join();
+            }
+        }
+    }
+}
+
+impl Drop for ReaderApp {
+    fn drop(&mut self) {
+        self.stop_boss_hotkey_runtime();
     }
 }
 

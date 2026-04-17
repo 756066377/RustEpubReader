@@ -305,6 +305,40 @@ impl ReaderApp {
                 egui::Slider::new(&mut self.reader_page_animation_speed, 0.04..=0.40).step_by(0.02),
             );
         }
+
+        ui.add_space(8.0);
+        ui.separator();
+        ui.add_space(8.0);
+        ui.label(
+            egui::RichText::new(self.i18n.t("settings.boss_key"))
+                .size(14.0)
+                .strong()
+                .color(heading_color),
+        );
+        ui.label(
+            egui::RichText::new(self.i18n.t("settings.boss_key_help"))
+                .size(12.0)
+                .color(Color32::from_gray(140)),
+        );
+        ui.horizontal(|ui| {
+            let response = ui.add(
+                egui::TextEdit::singleline(&mut self.boss_key_input)
+                    .hint_text("Ctrl+Shift+H")
+                    .desired_width(180.0),
+            );
+            let pressed_enter =
+                response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            if ui.button(self.i18n.t("settings.boss_key_apply")).clicked() || pressed_enter {
+                self.apply_boss_key_from_input();
+            }
+        });
+        if !self.boss_key_status.is_empty() {
+            ui.label(
+                egui::RichText::new(&self.boss_key_status)
+                    .size(12.0)
+                    .color(Color32::from_gray(150)),
+            );
+        }
     }
 
     fn render_settings_visual(&mut self, ui: &mut egui::Ui, heading_color: Color32) {
