@@ -616,10 +616,54 @@ fn default_bg_opacity() -> f32 {
     1.0
 }
 
+fn default_reader_toolbar_visible() -> bool {
+    false
+}
+
 fn generate_pin() -> String {
     use rand::RngCore;
     let val = rand::rngs::OsRng.next_u32() % 10000;
     format!("{:04}", val)
+}
+
+fn resize_direction_from_pointer(
+    rect: egui::Rect,
+    pointer_pos: egui::Pos2,
+    border: f32,
+) -> Option<egui::ResizeDirection> {
+    let left = pointer_pos.x <= rect.left() + border;
+    let right = pointer_pos.x >= rect.right() - border;
+    let top = pointer_pos.y <= rect.top() + border;
+    let bottom = pointer_pos.y >= rect.bottom() - border;
+
+    match (left, right, top, bottom) {
+        (true, false, true, false) => Some(egui::ResizeDirection::NorthWest),
+        (false, true, true, false) => Some(egui::ResizeDirection::NorthEast),
+        (true, false, false, true) => Some(egui::ResizeDirection::SouthWest),
+        (false, true, false, true) => Some(egui::ResizeDirection::SouthEast),
+        (true, false, false, false) => Some(egui::ResizeDirection::West),
+        (false, true, false, false) => Some(egui::ResizeDirection::East),
+        (false, false, true, false) => Some(egui::ResizeDirection::North),
+        (false, false, false, true) => Some(egui::ResizeDirection::South),
+        _ => None,
+    }
+}
+
+fn cursor_icon_for_resize(direction: egui::ResizeDirection) -> egui::CursorIcon {
+    match direction {
+        egui::ResizeDirection::North | egui::ResizeDirection::South => {
+            egui::CursorIcon::ResizeVertical
+        }
+        egui::ResizeDirection::East | egui::ResizeDirection::West => {
+            egui::CursorIcon::ResizeHorizontal
+        }
+        egui::ResizeDirection::NorthEast | egui::ResizeDirection::SouthWest => {
+            egui::CursorIcon::ResizeNeSw
+        }
+        egui::ResizeDirection::NorthWest | egui::ResizeDirection::SouthEast => {
+            egui::CursorIcon::ResizeNwSe
+        }
+    }
 }
 
 #[derive(Clone, Serialize, Deserialize, PartialEq)]
@@ -638,6 +682,8 @@ struct AppSettings {
     reader_bg_image_alpha: f32,
     scroll_mode: bool,
     show_toc: bool,
+    #[serde(default = "default_reader_toolbar_visible")]
+    reader_toolbar_visible: bool,
     #[serde(default)]
     language: String,
     #[serde(default)]
@@ -724,6 +770,7 @@ impl AppSettings {
             reader_bg_image_alpha: app.reader_bg_image_alpha,
             scroll_mode: app.scroll_mode,
             show_toc: app.show_toc,
+            reader_toolbar_visible: app.reader_toolbar_visible,
             language: app.i18n.language().code().to_string(),
             last_book_path,
             last_chapter,
@@ -759,6 +806,7 @@ impl AppSettings {
         app.reader_bg_image_alpha = self.reader_bg_image_alpha.clamp(0.0, 1.0);
         app.scroll_mode = self.scroll_mode;
         app.show_toc = self.show_toc;
+        app.reader_toolbar_visible = self.reader_toolbar_visible;
         app.auto_start_sharing = self.auto_start_sharing;
         app.line_spacing = self.line_spacing.clamp(0.8, 2.5);
         app.para_spacing = self.para_spacing.clamp(0.0, 2.0);
@@ -862,6 +910,7 @@ pub struct ReaderApp {
     pub reader_bg_texture: Option<egui::TextureHandle>,
     pub show_settings: bool,
     pub show_toc: bool,
+    pub reader_toolbar_visible: bool,
     pub scroll_to_top: bool,
     pub error_msg: Option<String>,
     pub view: AppView,
@@ -1142,6 +1191,7 @@ impl Default for ReaderApp {
             reader_bg_texture: None,
             show_settings: false,
             show_toc: true,
+            reader_toolbar_visible: default_reader_toolbar_visible(),
             scroll_to_top: false,
             error_msg: None,
             view: AppView::Library,
@@ -1993,6 +2043,45 @@ impl ReaderApp {
 }
 
 impl ReaderApp {
+    fn handle_reader_shortcuts(&mut self, ctx: &egui::Context) {
+        if self.view != AppView::Reader || self.boss_key_capturing {
+            return;
+        }
+
+        if ctx.input(|i| i.key_pressed(egui::Key::F2)) {
+            self.reader_toolbar_visible = !self.reader_toolbar_visible;
+        }
+    }
+
+    fn handle_root_viewport_resize(&self, ctx: &egui::Context) {
+        const BORDER: f32 = 6.0;
+
+        let Some(pointer_pos) = ctx.input(|i| i.pointer.hover_pos()) else {
+            return;
+        };
+
+        let rect = ctx.screen_rect();
+        let Some(direction) = resize_direction_from_pointer(rect, pointer_pos, BORDER) else {
+            return;
+        };
+
+        ctx.set_cursor_icon(cursor_icon_for_resize(direction));
+        if ctx.input(|i| i.pointer.primary_pressed()) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::BeginResize(direction));
+        }
+    }
+
+    pub(crate) fn handle_window_drag_zone(ui: &mut egui::Ui, id_suffix: &'static str) {
+        let drag_response = ui.interact(
+            ui.max_rect(),
+            ui.id().with(id_suffix),
+            egui::Sense::click_and_drag(),
+        );
+        if drag_response.drag_started_by(egui::PointerButton::Primary) {
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
+        }
+    }
+
     pub fn reader_bg_fill_color(&self) -> Color32 {
         let [r, g, b, _] = self.reader_bg_color.to_array();
         let alpha = (self.reader_bg_opacity * 255.0).round() as u8;
@@ -2186,6 +2275,8 @@ impl Drop for ReaderApp {
 impl eframe::App for ReaderApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.last_egui_ctx = Some(ctx.clone());
+        self.handle_root_viewport_resize(ctx);
+        self.handle_reader_shortcuts(ctx);
         self.poll_boss_key_capture(ctx);
         if !self.show_settings && self.boss_key_capturing {
             self.cancel_boss_key_capture();
@@ -2613,20 +2704,23 @@ impl eframe::App for ReaderApp {
 
         if self.view == AppView::Reader {
             self.ensure_reader_bg_texture(ctx);
-            egui::TopBottomPanel::top("toolbar")
-                .frame(
-                    egui::Frame::default()
-                        .inner_margin(egui::Margin {
-                            left: 16,
-                            right: 16,
-                            top: 8,
-                            bottom: 8,
-                        })
-                        .fill(ctx.style().visuals.panel_fill),
-                )
-                .show(ctx, |ui| {
-                    self.render_toolbar(ui);
-                });
+            if self.reader_toolbar_visible {
+                egui::TopBottomPanel::top("toolbar")
+                    .frame(
+                        egui::Frame::default()
+                            .inner_margin(egui::Margin {
+                                left: 16,
+                                right: 16,
+                                top: 8,
+                                bottom: 8,
+                            })
+                            .fill(ctx.style().visuals.panel_fill),
+                    )
+                    .show(ctx, |ui| {
+                        Self::handle_window_drag_zone(ui, "toolbar_drag_zone");
+                        self.render_toolbar(ui);
+                    });
+            }
 
             // TTS bar (between toolbar and content, Edge-style)
             if self.show_tts_panel {
@@ -2648,6 +2742,7 @@ impl eframe::App for ReaderApp {
                             .fill(ctx.style().visuals.window_fill()),
                     )
                     .show(ctx, |ui| {
+                        Self::handle_window_drag_zone(ui, "toc_drag_zone");
                         self.render_toc(ui);
                     });
             }
@@ -2671,8 +2766,14 @@ impl eframe::App for ReaderApp {
         egui::CentralPanel::default()
             .frame(egui::Frame::default().fill(reader_fill))
             .show(ctx, |ui| match self.view {
-                AppView::Library => self.render_library(ui),
-                AppView::Reader => self.render_reader(ui),
+                AppView::Library => {
+                    Self::handle_window_drag_zone(ui, "library_drag_zone");
+                    self.render_library(ui);
+                }
+                AppView::Reader => {
+                    Self::handle_window_drag_zone(ui, "reader_drag_zone");
+                    self.render_reader(ui);
+                }
             });
 
         // ── Floating windows ──

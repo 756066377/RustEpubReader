@@ -31,6 +31,7 @@ impl ReaderApp {
                     .fill(panel_bg)
                     .inner_margin(16.0)
                     .show(ui, |ui| {
+                        ReaderApp::handle_window_drag_zone(ui, "settings_drag_zone");
                         // Header
                         ui.horizontal(|ui| {
                             ui.label(
