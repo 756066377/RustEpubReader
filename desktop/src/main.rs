@@ -151,7 +151,7 @@ fn main() -> eframe::Result {
 
     let viewport = egui::ViewportBuilder::default()
         .with_inner_size([1200.0, 800.0])
-        .with_min_inner_size([600.0, 400.0])
+        .with_min_inner_size([360.0, 240.0])
         .with_resizable(true)
         .with_transparent(true)
         .with_decorations(false)
