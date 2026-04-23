@@ -27,7 +27,7 @@ import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.EditNote
-import androidx.compose.material.icons.filled.FormatListBulleted
+import androidx.compose.material.icons.automirrored.filled.FormatListBulleted
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Search
@@ -212,7 +212,7 @@ internal fun ReaderBottomBar(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 IconButton(onClick = onToggleToc) {
-                    Icon(Icons.Default.FormatListBulleted, I18n.t("nav.toc"))
+                    Icon(Icons.AutoMirrored.Filled.FormatListBulleted, I18n.t("nav.toc"))
                 }
                 IconButton(onClick = onShowAnnotations) {
                     Icon(Icons.Default.EditNote, I18n.t("annotations.title"))

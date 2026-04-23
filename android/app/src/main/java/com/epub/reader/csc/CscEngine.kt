@@ -77,7 +77,7 @@ class CscEngine {
      * Check text for potential spelling corrections.
      * Returns a list of [CorrectionInfo].
      */
-    fun check(text: String, threshold: Float = 0.90f): List<CorrectionInfo> {
+    fun check(text: String, threshold: Float = 0.95f): List<CorrectionInfo> {
         if (!isReady) return emptyList()
 
         val corrections = mutableListOf<CorrectionInfo>()
@@ -124,7 +124,9 @@ class CscEngine {
 
     private fun inferSentence(sentence: String, threshold: Float): List<CorrectionInfo> {
         val sess = session ?: return emptyList()
+        Log.d(TAG, "inferSentence input: '$sentence'")
         val encoded = encode(sentence)
+        Log.d(TAG, "encoded inputIds (first 20): ${encoded.inputIds.take(20).mapIndexed { i, id -> "[$i]=$id(${idToToken(id.toInt()) ?: "?"})" }.joinToString()}")
 
         // Create input tensors
         val inputIdsBuffer = LongBuffer.wrap(encoded.inputIds.toLongArray())
@@ -152,7 +154,7 @@ class CscEngine {
 
         val chars = sentence.toList()
         val corrections = mutableListOf<CorrectionInfo>()
-        val minMargin = 0.20f
+        val minMargin = 0.30f
 
         for ((pos, inputId) in encoded.inputIds.withIndex()) {
             // Skip special tokens
@@ -192,6 +194,8 @@ class CscEngine {
             val originalChar = if (charStart < chars.size) chars[charStart].toString()
             else idToToken(inputId.toInt()) ?: continue
 
+            Log.d(TAG, "pos=$pos, inputId=$inputId(${idToToken(inputId.toInt())}), predictedId=$predictedId(${idToToken(predictedId)}), charStart=$charStart, chars[$charStart]='${if (charStart < chars.size) chars[charStart] else '?'}'")
+
             // Filter 3: CJK only
             val origCh = originalChar.firstOrNull() ?: continue
             if (!isCjkChar(origCh)) continue
@@ -220,6 +224,11 @@ class CscEngine {
                     status = CorrectionStatus.PENDING
                 )
             )
+        }
+
+        // Debug: log all corrections
+        for (c in corrections) {
+            Log.d(TAG, "CSC correction: '${c.original}' -> '${c.corrected}' (conf=${c.confidence}, offset=${c.charOffset}), sentence[${c.charOffset}]='${if (c.charOffset < chars.size) chars[c.charOffset] else '?'}'")
         }
 
         // Clean up tensors
@@ -330,7 +339,9 @@ class CscEngine {
         "把", "被", "让", "给", "向", "往", "从", "到", "为",
         "而", "且", "或", "与", "及",
         "我", "你", "他", "她", "它", "谁", "啥",
-        "这", "那", "哪", "几", "多", "些"
+        "这", "那", "哪", "几", "多", "些",
+        "别", "是", "其", "悉", "有", "没", "不", "会", "能",
+        "要", "去", "来", "说", "看", "想", "知", "道"
     )
 }
 

@@ -3,8 +3,35 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use base64::Engine;
-use epub::doc::EpubDoc;
 use scraper::{Html, Selector};
+
+fn normalize_resource_path(path: &str) -> String {
+    let clean = path
+        .split('#')
+        .next()
+        .unwrap_or(path)
+        .split('?')
+        .next()
+        .unwrap_or(path)
+        .replace('\\', "/");
+    let absolute = clean.starts_with('/');
+    let mut parts = Vec::new();
+    for part in clean.split('/') {
+        match part {
+            "" | "." => {}
+            ".." => {
+                parts.pop();
+            }
+            _ => parts.push(part),
+        }
+    }
+    let joined = parts.join("/");
+    if absolute {
+        format!("/{joined}")
+    } else {
+        joined
+    }
+}
 
 /// Strip fragment/query from a src path, resolve it relative to chapter_dir,
 /// and return `(clean, resolved)`.  Returns `None` when the cleaned path is empty.
@@ -21,11 +48,14 @@ pub(super) fn clean_and_resolve_src(src: &str, chapter_dir: &Path) -> Option<(St
         return None;
     }
     let resolved = if clean.starts_with('/') {
-        clean.trim_start_matches('/').to_string()
+        clean.to_string()
     } else {
         chapter_dir.join(clean).to_string_lossy().to_string()
     };
-    Some((clean.to_string(), resolved))
+    Some((
+        normalize_resource_path(clean),
+        normalize_resource_path(&resolved),
+    ))
 }
 
 /// Look up image data by resolved path, falling back to filename match.
@@ -34,10 +64,19 @@ pub(super) fn lookup_image_by_path<'a>(
     resolved: &str,
     image_resources: &'a HashMap<String, Vec<u8>>,
 ) -> Option<&'a Vec<u8>> {
-    if let Some(data) = image_resources.get(resolved) {
+    let resolved = normalize_resource_path(resolved);
+    if let Some(data) = image_resources.get(&resolved) {
         return Some(data);
     }
-    let file_name = Path::new(clean)
+    let alt_resolved = if resolved.starts_with('/') {
+        resolved.trim_start_matches('/').to_string()
+    } else {
+        format!("/{resolved}")
+    };
+    if let Some(data) = image_resources.get(&alt_resolved) {
+        return Some(data);
+    }
+    let file_name = Path::new(&normalize_resource_path(clean))
         .file_name()
         .map(|n| n.to_string_lossy().to_string())?;
     image_resources.iter().find_map(|(k, v)| {
@@ -58,9 +97,9 @@ pub(super) fn lookup_image_by_path<'a>(
 pub(super) fn load_referenced_images(
     html: &str,
     chapter_path: &str,
-    image_path_index: &HashMap<String, std::path::PathBuf>,
+    image_resource_paths: &[String],
     image_resources: &mut HashMap<String, Vec<u8>>,
-    doc: &mut EpubDoc<std::io::BufReader<std::fs::File>>,
+    mut read_resource_bytes: impl FnMut(&str) -> Option<Vec<u8>>,
 ) {
     let document = Html::parse_document(html);
     let img_sel = Selector::parse("img, image").expect("valid selector");
@@ -84,9 +123,14 @@ pub(super) fn load_referenced_images(
             continue;
         }
         // Try direct path match
-        if let Some(epub_path) = image_path_index.get(&resolved) {
-            if let Some(data) = doc.get_resource_by_path(epub_path) {
-                image_resources.insert(resolved, data);
+        if let Some(epub_path) = image_resource_paths.iter().find(|candidate| {
+            let candidate_norm = normalize_resource_path(candidate);
+            candidate_norm == resolved
+                || candidate_norm.trim_start_matches('/') == resolved.trim_start_matches('/')
+        }) {
+            if let Some(data) = read_resource_bytes(epub_path) {
+                image_resources.insert(normalize_resource_path(epub_path), data.clone());
+                image_resources.insert(resolved.clone(), data);
                 continue;
             }
         }
@@ -95,15 +139,16 @@ pub(super) fn load_referenced_images(
             .file_name()
             .map(|n| n.to_string_lossy().to_string());
         if let Some(file_name) = file_name {
-            if let Some((key, epub_path)) = image_path_index.iter().find(|(k, _)| {
-                Path::new(k.as_str())
+            if let Some(epub_path) = image_resource_paths.iter().find(|candidate| {
+                Path::new(candidate.as_str())
                     .file_name()
                     .map(|n| n.to_string_lossy().to_string())
                     .as_deref()
                     == Some(&file_name)
             }) {
-                if let Some(data) = doc.get_resource_by_path(epub_path) {
-                    image_resources.insert(key.clone(), data);
+                if let Some(data) = read_resource_bytes(epub_path) {
+                    image_resources.insert(normalize_resource_path(epub_path), data.clone());
+                    image_resources.insert(resolved.clone(), data);
                 }
             }
         }

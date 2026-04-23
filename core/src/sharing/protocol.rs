@@ -28,6 +28,8 @@ pub enum Message {
         pairing_uuid: String,
         public_key_pem: String,
         device_name: String,
+        #[serde(default)]
+        device_id: Option<String>,
     },
     /// Server rejects (wrong PIN)
     PairRejected,

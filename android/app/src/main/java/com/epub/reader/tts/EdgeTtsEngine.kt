@@ -27,9 +27,9 @@ class EdgeTtsEngine(private val cacheDir: File) {
         private const val TAG = "EdgeTTS"
         private const val TRUSTED_CLIENT_TOKEN = "6A5AA1D4EAFF4E9FB37E23D68491D6F4"
         private const val VOICE_LIST_URL =
-            "https://speech.platform.bing.com/consumer/speech/synthesize/readaloud/voices/list?trustedclienttoken=$TRUSTED_CLIENT_TOKEN"
+            "https://api.msedgeservices.com/tts/cognitiveservices/voices/list?Ocp-Apim-Subscription-Key=$TRUSTED_CLIENT_TOKEN"
         private const val WSS_URL =
-            "wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1?TrustedClientToken=$TRUSTED_CLIENT_TOKEN"
+            "wss://api.msedgeservices.com/tts/cognitiveservices/websocket/v1?Ocp-Apim-Subscription-Key=$TRUSTED_CLIENT_TOKEN"
         private const val AUDIO_OUTPUT_FORMAT = "audio-24khz-48kbitrate-mono-mp3"
     }
 
@@ -63,6 +63,17 @@ class EdgeTtsEngine(private val cacheDir: File) {
         }
     }
 
+    private fun generateSecMsGec(): String {
+        val unixTimeSeconds = System.currentTimeMillis() / 1000L
+        var ticks = unixTimeSeconds + 11644473600L
+        ticks -= ticks % 300L
+        val windowsTicks = ticks * 10000000L
+        val strToHash = "$windowsTicks$TRUSTED_CLIENT_TOKEN"
+        val md = MessageDigest.getInstance("SHA-256")
+        val bytes = md.digest(strToHash.toByteArray(Charsets.US_ASCII))
+        return bytes.joinToString("") { "%02X".format(it) }
+    }
+
     private suspend fun synthesizeInternal(
         text: String,
         voice: String,
@@ -77,8 +88,13 @@ class EdgeTtsEngine(private val cacheDir: File) {
         val audioChunks = mutableListOf<ByteArray>()
         val completed = AtomicBoolean(false)
 
+        val connectionId = uuid()
+        val secMsGec = generateSecMsGec()
+        val secMsGecVersion = "1-130.0.0.0"
+        val url = "$WSS_URL&ConnectionId=$connectionId&Sec-MS-GEC=$secMsGec&Sec-MS-GEC-Version=$secMsGecVersion"
+
         val request = Request.Builder()
-            .url(WSS_URL)
+            .url(url)
             .header("Origin", "chrome-extension://jdiccldimpdaibmpdkjnbmckianbfold")
             .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0")
             .build()

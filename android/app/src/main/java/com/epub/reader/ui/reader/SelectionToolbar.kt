@@ -7,6 +7,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.automirrored.filled.*
+import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -116,7 +118,7 @@ fun SelectionFloatingMenu(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         IconButton(onClick = { showColorPicker = false }) {
-                            Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = iconClr)
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = iconClr)
                         }
                         ColorBubble(color = Color(0xFFFFC107)) { onAction(SelectionAction.HIGHLIGHT, "Yellow") }
                         ColorBubble(color = Color(0xFF66BB6A)) { onAction(SelectionAction.HIGHLIGHT, "Green") }
@@ -144,14 +146,14 @@ fun SelectionFloatingMenu(
                             onClick = { showColorPicker = true }
                         )
                         SelectionMenuItem(
-                            icon = Icons.Filled.StickyNote2,
+                            icon = Icons.AutoMirrored.Filled.StickyNote2,
                             label = I18n.t("selection.note"),
                             tint = Color(0xFF66BB6A),
                             textColor = textClr,
                             onClick = { onAction(SelectionAction.NOTE, null) }
                         )
                         SelectionMenuItem(
-                            icon = Icons.Filled.MenuBook,
+                            icon = Icons.AutoMirrored.Filled.MenuBook,
                             label = I18n.t("selection.dictionary"),
                             tint = iconClr,
                             textColor = textClr,

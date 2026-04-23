@@ -2,6 +2,7 @@
 name = "rust_epub_reader"
 version.workspace = true
 edition = "2021"
+license.workspace = true
 
 [dependencies]
 reader_core = { path = "../core", features = ["keychain"] }

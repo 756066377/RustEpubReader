@@ -457,17 +457,19 @@ fn handle_pairing(
                 if client_pin == pin {
                     let pairing_uuid = generate_uuid();
                     dbg_log!("PAIRING: PIN matched! pairing_uuid={}", pairing_uuid);
-                    let device_name = store
-                        .lock()
-                        .map_err(|e| format!("PeerStore lock poisoned: {}", e))?
-                        .device_name
-                        .clone();
+                    let (device_id, device_name) = {
+                        let s = store
+                            .lock()
+                            .map_err(|e| format!("PeerStore lock poisoned: {}", e))?;
+                        (s.device_id.clone(), s.device_name.clone())
+                    };
                     crypto::write_encrypted_message(
                         stream,
                         &Message::PairAccepted {
                             pairing_uuid: pairing_uuid.clone(),
                             public_key_pem: server_pub_key.to_string(),
                             device_name,
+                            device_id: Some(device_id),
                         },
                         &pair_key,
                         &mut pair_send_ctr,
@@ -768,13 +770,16 @@ pub fn connect_to_peer(
                     pairing_uuid,
                     public_key_pem,
                     device_name,
+                    device_id,
                 } => {
                     dbg_log!(
                         "CONNECT: PairAccepted! uuid={} device={}",
                         pairing_uuid,
                         device_name
                     );
-                    let remote_id = remote_device_id.unwrap_or("unknown").to_string();
+                    let remote_id = device_id
+                        .or_else(|| remote_device_id.map(str::to_string))
+                        .unwrap_or_else(|| "unknown".to_string());
                     store.add_paired(remote_id, device_name, pairing_uuid, public_key_pem.clone());
                     store.save(data_dir);
                     remote_pub_key = public_key_pem;
@@ -1315,6 +1320,90 @@ mod tests {
             None,
         );
         assert!(result2.is_ok(), "Re-auth failed: {:?}", result2.err());
+        let _ = t2.join();
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_manual_pairing_without_remote_id_should_store_real_server_id() {
+        let tmp = std::env::temp_dir().join("epub_manual_pair_remote_id_test");
+        let server_dir = tmp.join("server");
+        let client_dir = tmp.join("client");
+        let _ = std::fs::create_dir_all(&server_dir);
+        let _ = std::fs::create_dir_all(&client_dir);
+
+        let server_data = server_dir.to_string_lossy().to_string();
+        let client_data = client_dir.to_string_lossy().to_string();
+        let server_pin = "1357";
+
+        let server_store = PeerStore::load(&server_data);
+        let server_device_id = server_store.device_id.clone();
+        let server_store_arc = Arc::new(Mutex::new(server_store));
+
+        let mut client_store = PeerStore::load(&client_data);
+
+        // First connect manually without knowing remote device_id.
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap().to_string();
+
+        let ss = server_store_arc.clone();
+        let sd = server_data.clone();
+        let pin = server_pin.to_string();
+        let t = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(std::time::Duration::from_secs(10)))
+                .ok();
+            handle_client(&mut stream, &sd, &sd, &pin, ss, &[])
+        });
+
+        let first = connect_to_peer(&addr, &mut client_store, &client_data, None, Some(server_pin));
+        assert!(
+            first.is_ok(),
+            "manual pairing without remote id failed: {:?}",
+            first.err()
+        );
+        let _ = t.join();
+
+        assert!(
+            client_store
+                .paired
+                .iter()
+                .any(|p| p.device_id == server_device_id),
+            "client should store the server's real device_id after pairing"
+        );
+        assert!(
+            client_store.paired.iter().all(|p| p.device_id != "unknown"),
+            "client should no longer fall back to an 'unknown' paired device entry"
+        );
+
+        // Then reconnect using the discovered/real device_id without PIN.
+        let listener2 = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr2 = listener2.local_addr().unwrap().to_string();
+        let ss2 = server_store_arc.clone();
+        let sd2 = server_data.clone();
+        let pin2 = server_pin.to_string();
+        let t2 = std::thread::spawn(move || {
+            let (mut stream, _) = listener2.accept().unwrap();
+            stream
+                .set_read_timeout(Some(std::time::Duration::from_secs(10)))
+                .ok();
+            handle_client(&mut stream, &sd2, &sd2, &pin2, ss2, &[])
+        });
+
+        let second = connect_to_peer(
+            &addr2,
+            &mut client_store,
+            &client_data,
+            Some(&server_device_id),
+            None,
+        );
+        assert!(
+            second.is_ok(),
+            "reconnect using stored real device_id should not need PIN: {:?}",
+            second.err()
+        );
         let _ = t2.join();
 
         let _ = std::fs::remove_dir_all(&tmp);

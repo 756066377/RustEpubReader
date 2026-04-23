@@ -1749,3 +1749,67 @@ pub extern "C" fn Java_com_zhongbai233_epub_reader_RustBridge_collectCscSamples(
 
     jni_string_or_null!(env, lines)
 }
+
+#[unsafe(no_mangle)]
+pub extern "C" fn Java_com_zhongbai233_epub_reader_RustBridge_upsertCorrection(
+    mut env: JNIEnv,
+    _class: JClass,
+    data_dir: JString,
+    book_id: JString,
+    json_payload: JString,
+) -> jstring {
+    let data_dir: String = match env.get_string(&data_dir) {
+        Ok(s) => s.into(),
+        Err(_) => return std::ptr::null_mut(),
+    };
+    let book_id: String = match env.get_string(&book_id) {
+        Ok(s) => s.into(),
+        Err(_) => return std::ptr::null_mut(),
+    };
+    let payload: String = match env.get_string(&json_payload) {
+        Ok(s) => s.into(),
+        Err(_) => return std::ptr::null_mut(),
+    };
+
+    let mut cfg = match Library::read_book_config(&data_dir, &book_id) {
+        Some(c) => c,
+        None => return std::ptr::null_mut(),
+    };
+
+    #[derive(serde::Deserialize)]
+    struct CorrInput {
+        chapter: usize,
+        block_idx: usize,
+        char_offset: usize,
+        original: String,
+        corrected: String,
+        status: String,
+    }
+
+    let input: CorrInput = match serde_json::from_str(&payload) {
+        Ok(v) => v,
+        Err(_) => return std::ptr::null_mut(),
+    };
+
+    if let Some(existing) = cfg.corrections.iter_mut().find(|r| {
+        r.chapter == input.chapter
+            && r.block_idx == input.block_idx
+            && r.char_offset == input.char_offset
+    }) {
+        existing.status = input.status.clone();
+    } else {
+        cfg.corrections
+            .push(reader_core::library::CorrectionRecord {
+                chapter: input.chapter,
+                block_idx: input.block_idx,
+                char_offset: input.char_offset,
+                original: input.original,
+                corrected: input.corrected,
+                status: input.status.clone(),
+            });
+    }
+
+    cfg.save(&data_dir);
+
+    jni_string_or_null!(env, input.status)
+}

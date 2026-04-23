@@ -197,9 +197,9 @@ impl ReaderApp {
             }
         });
 
-        // Font family
+        // Latin font family
         ui.horizontal_wrapped(|ui| {
-            ui.label(self.i18n.t("settings.font"));
+            ui.label(self.i18n.t("settings.font_latin"));
             let font_popup_id = ui.make_persistent_id("font_family_popup");
             let btn = ui.button(&self.reader_font_family);
             if btn.clicked() {
@@ -236,7 +236,10 @@ impl ReaderApp {
                             let sys_filtered: Vec<String> = self
                                 .system_font_names
                                 .iter()
-                                .filter(|n| query.is_empty() || n.to_lowercase().contains(&query))
+                                .filter(|n| {
+                                    !crate::app::is_cjk_font_name(n)
+                                        && (query.is_empty() || n.to_lowercase().contains(&query))
+                                })
                                 .cloned()
                                 .collect();
                             if !sys_filtered.is_empty() {
@@ -249,6 +252,7 @@ impl ReaderApp {
                                         self.reader_font_family = name;
                                         self.pages_dirty = true;
                                         self.embedded_fonts_registered = false;
+                                        self.defer_custom_font_for_frame = true;
                                         close_popup = true;
                                     }
                                 }
@@ -269,6 +273,76 @@ impl ReaderApp {
                                         self.reader_font_family = name;
                                         self.pages_dirty = true;
                                         self.embedded_fonts_registered = false;
+                                        self.defer_custom_font_for_frame = true;
+                                        close_popup = true;
+                                    }
+                                }
+                            }
+                        });
+                    if close_popup {
+                        ui.memory_mut(|m| m.close_popup());
+                    }
+                },
+            );
+        });
+
+        // CJK font family
+        ui.horizontal_wrapped(|ui| {
+            ui.label(self.i18n.t("settings.font_cjk"));
+            let cjk_popup_id = ui.make_persistent_id("cjk_font_family_popup");
+            let btn = ui.button(&self.reader_cjk_font_family);
+            if btn.clicked() {
+                ui.memory_mut(|m| m.toggle_popup(cjk_popup_id));
+            }
+            egui::popup_below_widget(
+                ui,
+                cjk_popup_id,
+                &btn,
+                egui::PopupCloseBehavior::CloseOnClickOutside,
+                |ui| {
+                    ui.set_min_width(220.0);
+                    let te = ui.text_edit_singleline(&mut self.cjk_font_search);
+                    if btn.clicked() {
+                        te.request_focus();
+                    }
+                    let query = self.cjk_font_search.to_lowercase();
+                    let mut close_popup = false;
+                    egui::ScrollArea::vertical()
+                        .max_height(300.0)
+                        .show(ui, |ui| {
+                            if (query.is_empty() || "sans".contains(&query))
+                                && ui
+                                    .selectable_label(self.reader_cjk_font_family == "Sans", "Sans")
+                                    .clicked()
+                            {
+                                self.reader_cjk_font_family = "Sans".to_string();
+                                self.pages_dirty = true;
+                                self.embedded_fonts_registered = false;
+                                close_popup = true;
+                            }
+                            let cjk_filtered: Vec<String> = self
+                                .system_font_names
+                                .iter()
+                                .filter(|n| {
+                                    crate::app::is_cjk_font_name(n)
+                                        && (query.is_empty() || n.to_lowercase().contains(&query))
+                                })
+                                .cloned()
+                                .collect();
+                            if !cjk_filtered.is_empty() {
+                                ui.separator();
+                                for name in cjk_filtered {
+                                    if ui
+                                        .selectable_label(
+                                            self.reader_cjk_font_family == name,
+                                            &name,
+                                        )
+                                        .clicked()
+                                    {
+                                        self.reader_cjk_font_family = name;
+                                        self.pages_dirty = true;
+                                        self.embedded_fonts_registered = false;
+                                        self.defer_custom_font_for_frame = true;
                                         close_popup = true;
                                     }
                                 }

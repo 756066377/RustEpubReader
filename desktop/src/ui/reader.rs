@@ -103,14 +103,10 @@ impl ReaderApp {
             self.page_anim_cross_chapter_snapshot = None;
         }
 
-        let effective_font_family = if self.defer_custom_font_for_frame
-            && !matches!(
-                self.reader_font_family.as_str(),
-                "Sans" | "Serif" | "Monospace"
-            ) {
+        let effective_font_family = if self.defer_custom_font_for_frame {
             "Sans".to_string()
         } else {
-            self.reader_font_family.clone()
+            "ReaderFont".to_string()
         };
 
         let full_rect = ui.available_rect_before_wrap();

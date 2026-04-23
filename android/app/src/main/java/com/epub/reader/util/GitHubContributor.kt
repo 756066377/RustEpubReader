@@ -128,7 +128,7 @@ object GitHubContributor {
             conn.setRequestProperty("Accept", "application/vnd.github+json")
             val json = JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
             conn.disconnect()
-            json.optString("login", null)
+            json.optString("login", null as String?)
         } catch (e: Exception) {
             Log.e(TAG, "fetchUsername failed", e)
             null
@@ -231,7 +231,7 @@ object GitHubContributor {
                         return@withContext ContributeResult.Error("Failed to create/update file: HTTP $createStatus")
                     }
                 } else {
-                    val errBody = try { createConn.errorStream?.bufferedReader()?.use { it.readText() } } catch (_: Exception) { null }
+                    val errBody = try { createConn.errorStream?.bufferedReader()?.use { it.readText() } } catch (_: Exception) { null as String? }
                     createConn.disconnect()
                     return@withContext ContributeResult.Error("Create file failed: HTTP $createStatus ${errBody ?: ""}")
                 }
@@ -274,7 +274,7 @@ object GitHubContributor {
                     existingUrl ?: "https://github.com/$MODEL_REPO_OWNER/$MODEL_REPO_NAME/pulls"
                 )
             } else {
-                val errBody = try { prConn.errorStream?.bufferedReader()?.use { it.readText() } } catch (_: Exception) { null }
+                val errBody = try { prConn.errorStream?.bufferedReader()?.use { it.readText() } } catch (_: Exception) { null as String? }
                 prConn.disconnect()
                 return@withContext ContributeResult.Error("Create PR failed: HTTP $prStatus ${errBody ?: ""}")
             }

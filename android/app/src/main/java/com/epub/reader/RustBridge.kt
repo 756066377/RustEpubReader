@@ -57,4 +57,7 @@ object RustBridge {
     // CSC Contribution
     external fun getCscCorrectionCount(dataDir: String, bookId: String): Int
     external fun collectCscSamples(dataDir: String, bookPath: String, bookId: String): String?
+
+    // CSC Correction persistence
+    external fun upsertCorrection(dataDir: String, bookId: String, jsonPayload: String): String?
 }

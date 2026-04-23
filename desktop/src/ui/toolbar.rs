@@ -39,13 +39,12 @@ impl ReaderApp {
                 self.open_file_dialog();
             }
             ui.add_space(2.0);
-            if !compact {
-                if toggle_btn(ui, self.show_sharing_panel, "📡", btn_size)
+            if !compact
+                && toggle_btn(ui, self.show_sharing_panel, "📡", btn_size)
                     .on_hover_text(self.i18n.t("share.toolbar"))
                     .clicked()
-                {
-                    self.show_sharing_panel = !self.show_sharing_panel;
-                }
+            {
+                self.show_sharing_panel = !self.show_sharing_panel;
             }
 
             if self.book.is_some() {

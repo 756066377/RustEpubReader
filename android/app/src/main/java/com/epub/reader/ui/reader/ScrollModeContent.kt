@@ -40,7 +40,11 @@ internal fun ScrollModeContent(
     textSelection: TextSelectionState? = null,
     onSelectionChange: (TextSelectionState?) -> Unit = {},
     blockLayoutRegistry: MutableMap<Int, BlockLayoutInfo>? = null,
-    highlights: List<HighlightDto> = emptyList()
+    highlights: List<HighlightDto> = emptyList(),
+    cscBlockCorrections: Map<Int, List<CscBlockCorrection>> = emptyMap(),
+    cscMode: String = "none",
+    ttsCurrentBlock: Int = -1,
+    onCscCorrectionClick: (CscBlockCorrection, Offset) -> Unit = { _, _ -> }
 ) {
     val listState = rememberLazyListState()
     val showChapterTitle = remember(chapter) { shouldRenderChapterTitle(chapter) }
@@ -133,6 +137,7 @@ internal fun ScrollModeContent(
                 fontSize = fontSize,
                 textColor = textColor,
                 linkColor = linkColor,
+                bgColor = bgColor,
                 fontFamily = fontFamily,
                 onLinkClick = onLinkClick,
                 onTextTapped = onTextTapped,
@@ -142,7 +147,11 @@ internal fun ScrollModeContent(
                 textSelection = textSelection,
                 onSelectionChange = onSelectionChange,
                 blockLayoutRegistry = blockLayoutRegistry,
-                highlights = highlights
+                highlights = highlights,
+                cscBlockCorrections = cscBlockCorrections[blockIndex] ?: emptyList(),
+                cscMode = cscMode,
+                ttsCurrentBlock = ttsCurrentBlock,
+                onCscCorrectionClick = onCscCorrectionClick
             )
         }
 

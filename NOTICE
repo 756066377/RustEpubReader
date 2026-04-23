@@ -30,11 +30,11 @@ GitHub: https://github.com/emilk/egui
 License: MIT OR Apache-2.0
 
 ------------------------------------------------------------------------
-epub (Rust crate)
+rbook (Rust crate)
 ------------------------------------------------------------------------
-Copyright (c) epub-rs contributors
-Source: https://crates.io/crates/epub
-License: MIT
+Copyright (c) DevinSterling and contributors
+Source: https://crates.io/crates/rbook
+License: Apache License 2.0
 
 ------------------------------------------------------------------------
 Jetpack Compose / Android Jetpack

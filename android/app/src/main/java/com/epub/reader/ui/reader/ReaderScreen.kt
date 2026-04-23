@@ -90,6 +90,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.zhongbai233.epub.reader.model.*
 import com.zhongbai233.epub.reader.i18n.I18n
+import com.zhongbai233.epub.reader.csc.CorrectionStatus
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -198,7 +202,8 @@ fun ReaderScreen(
     cscModelReady: Boolean = false,
     cscModelLoading: Boolean = false,
     cscCorrections: List<com.zhongbai233.epub.reader.csc.CorrectionInfo> = emptyList(),
-    onDownloadCscModel: () -> Unit = {}
+    onDownloadCscModel: () -> Unit = {},
+    onCscCorrectionStatusChange: (CscBlockCorrection, CorrectionStatus) -> Unit = { _, _ -> }
 ) {
     var textSelection by remember { mutableStateOf<TextSelectionState?>(null) }
     var selectionAnchorRange by remember { mutableStateOf<TextSelectionState?>(null) }
@@ -206,6 +211,12 @@ fun ReaderScreen(
     var rootLayoutCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
     val blockLayoutRegistry = remember { mutableMapOf<Int, BlockLayoutInfo>() }
     val chapter = book.chapters.getOrNull(currentChapter)
+    val cscBlockCorrections = remember(cscCorrections, chapter) {
+        if (cscCorrections.isEmpty() || chapter == null) emptyMap()
+        else mapCscCorrectionsToBlocks(chapter.blocks, cscCorrections)
+    }
+    var cscPopupCorrection by remember { mutableStateOf<CscBlockCorrection?>(null) }
+    var cscPopupPosition by remember { mutableStateOf(Offset.Zero) }
     val uriHandler = LocalUriHandler.current
 
     val onLinkClick: (String) -> Unit = { raw ->
@@ -254,6 +265,7 @@ fun ReaderScreen(
     // 控制栏显示/隐藏
     var showControls by remember { mutableStateOf(false) }
     var showSettingsSheet by rememberSaveable { mutableStateOf(false) }
+    var showTtsSettings by rememberSaveable { mutableStateOf(false) }
     val startAtLastPageRef = remember { booleanArrayOf(false) }
 
     // ─── 自定义选区工具栏状态 ───
@@ -565,6 +577,18 @@ fun ReaderScreen(
             showControls = true
         }
     }
+    
+    if (showTtsSettings) {
+        TtsSettingsSheet(
+            voiceName = ttsVoiceName,
+            rate = ttsRate,
+            volume = ttsVolume,
+            onVoiceChange = onTtsVoiceNameChange,
+            onRateChange = onTtsRateChange,
+            onVolumeChange = onTtsVolumeChange,
+            onDismiss = { showTtsSettings = false }
+        )
+    }
 
     // ─── 选中拖拽手势回调（提取为 lambda，供各模式复用）───
     val selectionOnDragStart: (Offset) -> Unit = { offset ->
@@ -689,7 +713,7 @@ fun ReaderScreen(
                     .fillMaxSize()
                     .pointerInput(Unit) {
                         detectTapGestures {
-                            if (!showSettingsSheet) {
+                            if (!showSettingsSheet && cscPopupCorrection == null) {
                                 showControls = !showControls
                             }
                         }
@@ -726,7 +750,22 @@ fun ReaderScreen(
                     textSelection = textSelection,
                     onSelectionChange = { textSelection = it },
                     blockLayoutRegistry = blockLayoutRegistry,
-                    highlights = highlights
+                    highlights = highlights,
+                    cscBlockCorrections = cscBlockCorrections,
+                    cscMode = cscMode,
+                    ttsCurrentBlock = ttsCurrentBlock,
+                    onCscCorrectionClick = { correction, localPos ->
+                        cscPopupCorrection = correction
+                        val root = rootLayoutCoords
+                        val blockInfo = blockLayoutRegistry[correction.blockIndex]
+                        if (root != null && blockInfo?.coordinates != null
+                            && root.isAttached && blockInfo.coordinates.isAttached
+                        ) {
+                            cscPopupPosition = root.localPositionOf(blockInfo.coordinates, localPos)
+                        } else {
+                            cscPopupPosition = localPos
+                        }
+                    }
                 )
 
                 // 书签下拉指示文字
@@ -795,8 +834,88 @@ fun ReaderScreen(
                 onSelectionDrag = selectionOnDrag,
                 onSelectionDragEnd = selectionOnDragEnd,
                 onSelectionDragCancel = selectionOnDragCancel,
-                highlights = highlights
+                highlights = highlights,
+                cscBlockCorrections = cscBlockCorrections,
+                cscMode = cscMode,
+                ttsCurrentBlock = ttsCurrentBlock,
+                onCscCorrectionClick = { correction, localPos ->
+                    cscPopupCorrection = correction
+                    val root = rootLayoutCoords
+                    val blockInfo = blockLayoutRegistry[correction.blockIndex]
+                    if (root != null && blockInfo?.coordinates != null
+                        && root.isAttached && blockInfo.coordinates.isAttached
+                    ) {
+                        cscPopupPosition = root.localPositionOf(blockInfo.coordinates, localPos)
+                    } else {
+                        cscPopupPosition = localPos
+                    }
+                }
             )
+        }
+
+        // CSC 纠错弹出菜单
+        if (cscPopupCorrection != null) {
+            val density = LocalDensity.current
+            Popup(
+                alignment = Alignment.TopStart,
+                offset = with(density) {
+                    IntOffset(
+                        cscPopupPosition.x.toInt(),
+                        (cscPopupPosition.y - 48.dp.toPx()).toInt()
+                    )
+                },
+                onDismissRequest = { cscPopupCorrection = null },
+                properties = PopupProperties(focusable = true)
+            ) {
+                val correction = cscPopupCorrection!!
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    tonalElevation = 4.dp,
+                    shadowElevation = 4.dp,
+                    color = MaterialTheme.colorScheme.surface
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Text(
+                            text = "${correction.original} → ${correction.corrected}",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(bottom = 8.dp)
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FilledTonalButton(
+                                onClick = {
+                                    onCscCorrectionStatusChange(correction, CorrectionStatus.ACCEPTED)
+                                    cscPopupCorrection = null
+                                },
+                                colors = ButtonDefaults.filledTonalButtonColors(
+                                    containerColor = Color(0xFF4CAF50).copy(alpha = 0.15f)
+                                )
+                            ) {
+                                Text("✓ ${I18n.t("csc.accept")}")
+                            }
+                            FilledTonalButton(
+                                onClick = {
+                                    onCscCorrectionStatusChange(correction, CorrectionStatus.REJECTED)
+                                    cscPopupCorrection = null
+                                },
+                                colors = ButtonDefaults.filledTonalButtonColors(
+                                    containerColor = Color(0xFFF44336).copy(alpha = 0.15f)
+                                )
+                            ) {
+                                Text("✗ ${I18n.t("csc.revert")}")
+                            }
+                            FilledTonalButton(
+                                onClick = {
+                                    onCscCorrectionStatusChange(correction, CorrectionStatus.IGNORED)
+                                    cscPopupCorrection = null
+                                }
+                            ) {
+                                Text(I18n.t("csc.ignore"))
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         // 顶部控制栏 — 覆盖层 + 动画
@@ -824,9 +943,9 @@ fun ReaderScreen(
         // TTS 控制栏
         AnimatedVisibility(
             visible = showTtsBar,
-            enter = slideInVertically { -it } + fadeIn(),
-            exit = slideOutVertically { -it } + fadeOut(),
-            modifier = Modifier.align(Alignment.TopCenter).padding(top = if (showControls) 56.dp else 0.dp)
+            enter = slideInVertically { it } + fadeIn(),
+            exit = slideOutVertically { it } + fadeOut(),
+            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = if (showControls) 190.dp else 48.dp)
         ) {
             TtsControlBar(
                 playing = ttsPlaying,
@@ -837,7 +956,8 @@ fun ReaderScreen(
                 onPause = onTtsPause,
                 onResume = onTtsResume,
                 onStop = onTtsStop,
-                onClose = onTtsClose
+                onClose = onTtsClose,
+                onSettings = { showTtsSettings = true }
             )
         }
 
@@ -865,7 +985,7 @@ fun ReaderScreen(
             )
         }
 
-        if (showSettingsSheet) {
+    if (showSettingsSheet) {
             ReaderSettingsSheet(
                 fontSize = fontSize,
                 scrollMode = scrollMode,

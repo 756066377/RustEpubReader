@@ -101,7 +101,11 @@ internal fun PageModeContent(
     onSelectionDrag: (Offset) -> Unit = {},
     onSelectionDragEnd: () -> Unit = {},
     onSelectionDragCancel: () -> Unit = {},
-    highlights: List<HighlightDto> = emptyList()
+    highlights: List<HighlightDto> = emptyList(),
+    cscBlockCorrections: Map<Int, List<CscBlockCorrection>> = emptyMap(),
+    cscMode: String = "none",
+    ttsCurrentBlock: Int = -1,
+    onCscCorrectionClick: (CscBlockCorrection, Offset) -> Unit = { _, _ -> }
 ) {
     val configuration = LocalConfiguration.current
     val density = LocalDensity.current
@@ -606,7 +610,11 @@ internal fun PageModeContent(
                     textSelection = textSelection,
                     onSelectionChange = onSelectionChange,
                     blockLayoutRegistry = if (spreadIndex == bookSpreadPageCurlState.current) blockLayoutRegistry else null,
-                    highlights = highlights
+                    highlights = highlights,
+                    cscBlockCorrections = cscBlockCorrections,
+                    cscMode = cscMode,
+                    ttsCurrentBlock = ttsCurrentBlock,
+                    onCscCorrectionClick = onCscCorrectionClick
                 )
             }
         } else if (pageAnimation == "Realistic") {
@@ -703,7 +711,11 @@ internal fun PageModeContent(
                     textSelection = textSelection,
                     onSelectionChange = onSelectionChange,
                     blockLayoutRegistry = if (pageIndex == pageCurlState.current) blockLayoutRegistry else null,
-                    highlights = highlights
+                    highlights = highlights,
+                    cscBlockCorrections = cscBlockCorrections,
+                    cscMode = cscMode,
+                    ttsCurrentBlock = ttsCurrentBlock,
+                    onCscCorrectionClick = onCscCorrectionClick
                 )
             }
         } else {
@@ -853,7 +865,11 @@ internal fun PageModeContent(
                     textSelection = textSelection,
                     onSelectionChange = onSelectionChange,
                     blockLayoutRegistry = if (pageIndex == pagerState.currentPage) blockLayoutRegistry else null,
-                    highlights = highlights
+                    highlights = highlights,
+                    cscBlockCorrections = cscBlockCorrections,
+                    cscMode = cscMode,
+                    ttsCurrentBlock = ttsCurrentBlock,
+                    onCscCorrectionClick = onCscCorrectionClick
                     )
                 }
             }
@@ -888,7 +904,11 @@ private fun PageRenderLayer(
     textSelection: TextSelectionState? = null,
     onSelectionChange: (TextSelectionState?) -> Unit = {},
     blockLayoutRegistry: MutableMap<Int, BlockLayoutInfo>? = null,
-    highlights: List<HighlightDto> = emptyList()
+    highlights: List<HighlightDto> = emptyList(),
+    cscBlockCorrections: Map<Int, List<CscBlockCorrection>> = emptyMap(),
+    cscMode: String = "none",
+    ttsCurrentBlock: Int = -1,
+    onCscCorrectionClick: (CscBlockCorrection, Offset) -> Unit = { _, _ -> }
 ) {
     androidx.compose.foundation.layout.Box(
         modifier = Modifier
@@ -937,6 +957,7 @@ private fun PageRenderLayer(
                             fontSize = fontSize,
                             textColor = textColor,
                             linkColor = linkColor,
+                            bgColor = bgColor,
                             fontFamily = fontFamily,
                             onLinkClick = onLinkClick,
                             onTextTapped = onTextTapped,
@@ -946,7 +967,11 @@ private fun PageRenderLayer(
                             textSelection = textSelection,
                             onSelectionChange = onSelectionChange,
                             blockLayoutRegistry = blockLayoutRegistry,
-                            highlights = highlights
+                            highlights = highlights,
+                            cscBlockCorrections = if (blockIndex != null && blockIndex >= 0) cscBlockCorrections[blockIndex] ?: emptyList() else emptyList(),
+                            cscMode = cscMode,
+                            ttsCurrentBlock = ttsCurrentBlock,
+                            onCscCorrectionClick = onCscCorrectionClick
                         )
                     }
                 }

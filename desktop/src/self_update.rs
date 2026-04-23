@@ -62,7 +62,7 @@ struct ReleaseAsset {
 struct MatchedAsset {
     release_name: String,
     tag_name: String,
-    download_url: String,
+    download_urls: Vec<String>,
     size: u64,
     sha256: Option<String>,
 }
@@ -226,12 +226,7 @@ fn get_latest_release_asset() -> Result<MatchedAsset> {
         }
         if asset.name.contains(&platform_key) {
             let original_url = asset.browser_download_url;
-            let accel_disabled = std::env::var("RER_DISABLE_ACCEL").ok().as_deref() == Some("1");
-            let download_url = if accel_disabled {
-                original_url.clone()
-            } else {
-                get_accelerated_url(&original_url)
-            };
+            let download_urls = build_download_urls(&original_url);
 
             let sha256 = asset
                 .digest
@@ -243,7 +238,7 @@ fn get_latest_release_asset() -> Result<MatchedAsset> {
             return Ok(MatchedAsset {
                 release_name,
                 tag_name,
-                download_url,
+                download_urls,
                 size: asset.size.unwrap_or(0),
                 sha256,
             });
@@ -263,6 +258,21 @@ fn get_accelerated_url(original_url: &str) -> String {
     } else {
         original_url.to_string()
     }
+}
+
+fn build_download_urls(original_url: &str) -> Vec<String> {
+    let accel_disabled = std::env::var("RER_DISABLE_ACCEL").ok().as_deref() == Some("1");
+    let mut urls = Vec::new();
+
+    if !accel_disabled {
+        let accelerated = get_accelerated_url(original_url);
+        if accelerated != original_url {
+            urls.push(accelerated);
+        }
+    }
+
+    urls.push(original_url.to_string());
+    urls
 }
 
 fn start_update(matched: &MatchedAsset, on_progress: Option<ProgressCallback>) -> Result<()> {
@@ -287,8 +297,29 @@ fn download_and_verify(
     matched: &MatchedAsset,
     on_progress: Option<ProgressCallback>,
 ) -> Result<PathBuf> {
+    let on_progress = on_progress.as_ref();
+    let mut errors = Vec::new();
+
+    for url in &matched.download_urls {
+        match download_and_verify_from_url(tmp_dir, matched, url, on_progress) {
+            Ok(path) => return Ok(path),
+            Err(err) => errors.push(format!("{url}: {err:#}")),
+        }
+    }
+
+    Err(anyhow!(
+        "failed to download update from all sources:\n{}",
+        errors.join("\n")
+    ))
+}
+
+fn download_and_verify_from_url(
+    tmp_dir: &Path,
+    matched: &MatchedAsset,
+    url: &str,
+    on_progress: Option<&ProgressCallback>,
+) -> Result<PathBuf> {
     let client = build_http_client()?;
-    let url = &matched.download_url;
 
     let resp = client
         .get(url)
@@ -314,6 +345,7 @@ fn download_and_verify(
         .unwrap_or("update.bin");
 
     let out_path = tmp_dir.join(fname);
+    let _ = fs::remove_file(&out_path);
 
     let mut hasher = Sha256::new();
     let mut file = fs::File::create(&out_path).context("create temp file")?;
@@ -329,7 +361,7 @@ fn download_and_verify(
         file.write_all(&buf[..n]).context("write temp file")?;
         hasher.update(&buf[..n]);
         downloaded += n as u64;
-        if let Some(ref cb) = on_progress {
+        if let Some(cb) = on_progress {
             cb(downloaded, total);
         }
     }
@@ -348,6 +380,29 @@ fn download_and_verify(
     }
 
     Ok(out_path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{build_download_urls, get_accelerated_url};
+
+    #[test]
+    fn accelerated_url_maps_github_release_path() {
+        let original = "https://github.com/zhongbai2333/RustEpubReader/releases/download/v1.0.2/RustEpubReader-Win64-v1.0.2.exe";
+        let accelerated = get_accelerated_url(original);
+        assert_eq!(
+            accelerated,
+            "https://dl.zhongbai233.com/release/v1.0.2/RustEpubReader-Win64-v1.0.2.exe"
+        );
+    }
+
+    #[test]
+    fn download_urls_include_github_fallback() {
+        let original = "https://github.com/zhongbai2333/RustEpubReader/releases/download/v1.0.2/RustEpubReader-Win64-v1.0.2.exe";
+        let urls = build_download_urls(original);
+        assert_eq!(urls.len(), 2);
+        assert_eq!(urls[1], original);
+    }
 }
 
 fn current_executable_path() -> Result<PathBuf> {

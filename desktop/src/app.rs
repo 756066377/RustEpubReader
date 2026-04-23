@@ -466,6 +466,17 @@ fn collect_font_files(dir: &Path, depth: usize, out: &mut Vec<PathBuf>) {
     }
 }
 
+pub(crate) fn is_cjk_font_name(s: &str) -> bool {
+    s.chars().any(|c| ('\u{4E00}'..='\u{9FFF}').contains(&c))
+        || s.contains("CJK")
+        || s.ends_with(" SC")
+        || s.ends_with(" TC")
+}
+
+fn default_sans() -> String {
+    "Sans".to_string()
+}
+
 fn discover_system_fonts() -> (Vec<String>, HashMap<String, String>) {
     // 已知字体文件 stem → 人性化显示名（优先匹配，避免显示 "msyh" 之类的文件名）
     let known_names: HashMap<&str, &str> = [
@@ -577,12 +588,7 @@ fn discover_system_fonts() -> (Vec<String>, HashMap<String, String>) {
     }
 
     // CJK 字体排前面，其余按字母升序
-    let is_cjk = |s: &str| -> bool {
-        s.chars().any(|c| ('\u{4E00}'..='\u{9FFF}').contains(&c))
-            || s.contains("CJK")
-            || s.ends_with(" SC")
-            || s.ends_with(" TC")
-    };
+    let is_cjk = is_cjk_font_name;
     let mut names: Vec<String> = font_map.keys().cloned().collect();
     names.sort_by(|a, b| {
         let a_cjk = is_cjk(a);
@@ -675,6 +681,8 @@ struct AppSettings {
     reader_bg_opacity: f32,
     reader_font_color: Option<[u8; 4]>,
     reader_font_family: String,
+    #[serde(default = "default_sans")]
+    reader_cjk_font_family: String,
     reader_page_animation: String,
     #[serde(default = "default_anim_speed")]
     reader_page_animation_speed: f32,
@@ -764,6 +772,7 @@ impl AppSettings {
             reader_bg_opacity: app.reader_bg_opacity,
             reader_font_color: app.reader_font_color.map(Self::from_color),
             reader_font_family: app.reader_font_family.clone(),
+            reader_cjk_font_family: app.reader_cjk_font_family.clone(),
             reader_page_animation: app.reader_page_animation.clone(),
             reader_page_animation_speed: app.reader_page_animation_speed,
             reader_bg_image_path: app.reader_bg_image_path.clone(),
@@ -800,6 +809,7 @@ impl AppSettings {
         app.reader_bg_opacity = self.reader_bg_opacity.clamp(0.0, 1.0);
         app.reader_font_color = self.reader_font_color.map(Self::to_color);
         app.reader_font_family = self.reader_font_family.clone();
+        app.reader_cjk_font_family = self.reader_cjk_font_family.clone();
         app.reader_page_animation = self.reader_page_animation.clone();
         app.reader_page_animation_speed = self.reader_page_animation_speed.clamp(0.04, 0.40);
         app.reader_bg_image_path = self.reader_bg_image_path.clone();
@@ -903,6 +913,7 @@ pub struct ReaderApp {
     pub reader_bg_opacity: f32,
     pub reader_font_color: Option<Color32>,
     pub reader_font_family: String,
+    pub reader_cjk_font_family: String,
     pub reader_page_animation: String,
     pub reader_page_animation_speed: f32,
     pub reader_bg_image_path: Option<String>,
@@ -935,11 +946,17 @@ pub struct ReaderApp {
     pub embedded_font_names: Vec<String>,
     pub embedded_fonts_registered: bool,
     pub defer_custom_font_for_frame: bool,
+    /// Font family the user originally chose; kept so we can retry after async
+    /// font discovery completes (the fallback may have temporarily reset
+    /// `reader_font_family` to "Sans").
+    pending_font_family: Option<String>,
+    pending_cjk_font_family: Option<String>,
     pub system_font_names: Vec<String>,
-    system_font_paths: HashMap<String, String>,
+    pub(crate) system_font_paths: HashMap<String, String>,
     font_discovery_result: FontDiscoveryResult,
     last_saved_settings: Option<AppSettings>,
     pub font_search: String,
+    pub cjk_font_search: String,
     pub i18n: I18n,
     pub previous_chapter: Option<usize>,
     pub scroll_toc_to_current: bool,
@@ -1185,6 +1202,7 @@ impl Default for ReaderApp {
             reader_bg_opacity: default_bg_opacity(),
             reader_font_color: None,
             reader_font_family: "Sans".to_string(),
+            reader_cjk_font_family: "Sans".to_string(),
             reader_page_animation: "Slide".to_string(),
             reader_page_animation_speed: 0.14,
             reader_bg_image_path: None,
@@ -1217,11 +1235,14 @@ impl Default for ReaderApp {
             embedded_font_names: Vec::new(),
             embedded_fonts_registered: true,
             defer_custom_font_for_frame: false,
+            pending_font_family: None,
+            pending_cjk_font_family: None,
             system_font_names: Vec::new(),
             system_font_paths: HashMap::new(),
             font_discovery_result,
             last_saved_settings: None,
             font_search: String::new(),
+            cjk_font_search: String::new(),
             i18n: I18n::default(),
             previous_chapter: None,
             scroll_toc_to_current: false,
@@ -1931,6 +1952,7 @@ impl ReaderApp {
     fn render_update_dialog(&mut self, ctx: &egui::Context) {
         let tag = self.update_latest_tag.clone().unwrap_or_default();
         let mut open = self.show_update_dialog;
+        let mut close_requested = false;
         egui::Window::new(self.i18n.t("update.check"))
             .open(&mut open)
             .collapsible(false)
@@ -1948,11 +1970,17 @@ impl ReaderApp {
 
                     match &self.update_state {
                         UpdateState::Available(_) => {
-                            ui.horizontal(|ui| {
+                            let button_size = egui::vec2(140.0, 32.0);
+                            ui.horizontal_centered(|ui| {
                                 if ui
-                                    .button(
-                                        egui::RichText::new(self.i18n.t("update.download_update"))
+                                    .add_sized(
+                                        button_size,
+                                        egui::Button::new(
+                                            egui::RichText::new(
+                                                self.i18n.t("update.download_update"),
+                                            )
                                             .size(14.0),
+                                        ),
                                     )
                                     .clicked()
                                 {
@@ -1994,13 +2022,16 @@ impl ReaderApp {
                                     self._update_progress = Some(progress_for_ui);
                                 }
                                 if ui
-                                    .button(
-                                        egui::RichText::new(self.i18n.t("feedback.not_now"))
-                                            .size(14.0),
+                                    .add_sized(
+                                        button_size,
+                                        egui::Button::new(
+                                            egui::RichText::new(self.i18n.t("feedback.not_now"))
+                                                .size(14.0),
+                                        ),
                                     )
                                     .clicked()
                                 {
-                                    self.show_update_dialog = false;
+                                    close_requested = true;
                                 }
                             });
                         }
@@ -2024,7 +2055,7 @@ impl ReaderApp {
                             );
                             ui.add_space(4.0);
                             if ui.button(self.i18n.t("update.check")).clicked() {
-                                self.show_update_dialog = false;
+                                close_requested = true;
                                 self.update_state = UpdateState::Idle;
                             }
                         }
@@ -2040,6 +2071,9 @@ impl ReaderApp {
                     ui.add_space(8.0);
                 });
             });
+        if close_requested {
+            open = false;
+        }
         self.show_update_dialog = open;
     }
 }
@@ -2333,6 +2367,20 @@ impl eframe::App for ReaderApp {
                 if let Some((names, paths)) = slot.take() {
                     self.system_font_names = names;
                     self.system_font_paths = paths;
+                    // Restore the user's preferred fonts now that system fonts
+                    // are available, and trigger re-registration so the fonts
+                    // actually get loaded into egui.
+                    if let Some(preferred) = self.pending_font_family.take() {
+                        if self.system_font_paths.contains_key(&preferred) {
+                            self.reader_font_family = preferred;
+                        }
+                    }
+                    if let Some(preferred) = self.pending_cjk_font_family.take() {
+                        if self.system_font_paths.contains_key(&preferred) {
+                            self.reader_cjk_font_family = preferred;
+                        }
+                    }
+                    self.embedded_fonts_registered = false;
                 }
             }
         }
@@ -2534,10 +2582,19 @@ impl eframe::App for ReaderApp {
         if !self.embedded_fonts_registered {
             self.embedded_fonts_registered = true;
             let mut fonts = egui::FontDefinitions::default();
-            let mut selected_family_bound = matches!(
+
+            // Save default proportional chain (egui built-in Latin fonts) before CJK additions
+            let default_proportional = fonts
+                .families
+                .get(&egui::FontFamily::Proportional)
+                .cloned()
+                .unwrap_or_default();
+
+            let mut selected_latin_bound = matches!(
                 self.reader_font_family.as_str(),
                 "Sans" | "Serif" | "Monospace"
             );
+            let mut selected_cjk_bound = matches!(self.reader_cjk_font_family.as_str(), "Sans");
 
             // Re-register system fonts (same as setup_fonts in main.rs)
             let cjk_paths: &[&str] = &[
@@ -2616,11 +2673,15 @@ impl eframe::App for ReaderApp {
                         .families
                         .insert(egui::FontFamily::Name(name.clone().into()), fallback);
                     if *name == self.reader_font_family {
-                        selected_family_bound = true;
+                        selected_latin_bound = true;
+                    }
+                    if *name == self.reader_cjk_font_family {
+                        selected_cjk_bound = true;
                     }
                 }
             }
 
+            // Register custom Latin system font
             if !matches!(
                 self.reader_font_family.as_str(),
                 "Sans" | "Serif" | "Monospace"
@@ -2639,13 +2700,46 @@ impl eframe::App for ReaderApp {
                             egui::FontFamily::Name(self.reader_font_family.clone().into()),
                             fallback,
                         );
-                        selected_family_bound = true;
+                        selected_latin_bound = true;
                     }
                 }
             }
 
-            if !selected_family_bound {
+            // Register custom CJK system font
+            if !matches!(self.reader_cjk_font_family.as_str(), "Sans")
+                && !fonts.font_data.contains_key(&self.reader_cjk_font_family)
+            {
+                if let Some(path) = self.system_font_paths.get(&self.reader_cjk_font_family) {
+                    if let Ok(data) = std::fs::read(path) {
+                        fonts.font_data.insert(
+                            self.reader_cjk_font_family.clone(),
+                            egui::FontData::from_owned(data).into(),
+                        );
+                        selected_cjk_bound = true;
+                    }
+                }
+            }
+
+            // Latin font fallback to Sans if not bound
+            if !selected_latin_bound {
+                if !self.reader_font_family.is_empty()
+                    && self.reader_font_family != "Sans"
+                    && self.system_font_names.is_empty()
+                {
+                    self.pending_font_family = Some(self.reader_font_family.clone());
+                }
                 self.reader_font_family = "Sans".to_string();
+            }
+
+            // CJK font fallback to Sans if not bound
+            if !selected_cjk_bound {
+                if !self.reader_cjk_font_family.is_empty()
+                    && self.reader_cjk_font_family != "Sans"
+                    && self.system_font_names.is_empty()
+                {
+                    self.pending_cjk_font_family = Some(self.reader_cjk_font_family.clone());
+                }
+                self.reader_cjk_font_family = "Sans".to_string();
             }
 
             // Emoji / symbol fallback font
@@ -2675,16 +2769,61 @@ impl eframe::App for ReaderApp {
                 }
             }
 
+            // Build "ReaderFont" composite family: Latin fonts → CJK fonts → emoji
+            let mut reader_font_chain: Vec<String> = Vec::new();
+
+            // Latin part
+            match self.reader_font_family.as_str() {
+                "Sans" => reader_font_chain.extend(default_proportional.clone()),
+                "Serif" => {
+                    if fonts.font_data.contains_key("serif_font") {
+                        reader_font_chain.push("serif_font".to_owned());
+                    }
+                    reader_font_chain.extend(default_proportional.clone());
+                }
+                "Monospace" => {
+                    if let Some(mono) = fonts.families.get(&egui::FontFamily::Monospace) {
+                        reader_font_chain.extend(mono.clone());
+                    }
+                }
+                other => {
+                    if fonts.font_data.contains_key(other) {
+                        reader_font_chain.push(other.to_owned());
+                    }
+                    reader_font_chain.extend(default_proportional.clone());
+                }
+            }
+
+            // CJK part
+            match self.reader_cjk_font_family.as_str() {
+                "Sans" => {
+                    if fonts.font_data.contains_key("cjk_font") {
+                        reader_font_chain.push("cjk_font".to_owned());
+                    }
+                }
+                other => {
+                    if fonts.font_data.contains_key(other) {
+                        reader_font_chain.push(other.to_owned());
+                    }
+                    if fonts.font_data.contains_key("cjk_font") {
+                        reader_font_chain.push("cjk_font".to_owned());
+                    }
+                }
+            }
+
+            // Emoji
+            if fonts.font_data.contains_key("emoji_font") {
+                reader_font_chain.push("emoji_font".to_owned());
+            }
+
+            fonts.families.insert(
+                egui::FontFamily::Name("ReaderFont".into()),
+                reader_font_chain,
+            );
+
             ctx.set_fonts(fonts);
             self.pages_dirty = true;
-            // Font definitions take effect next frame. Keep rendering, but temporarily
-            // fallback custom font family to Sans in this frame to avoid panic and flash.
-            if !matches!(
-                self.reader_font_family.as_str(),
-                "Sans" | "Serif" | "Monospace"
-            ) {
-                self.defer_custom_font_for_frame = true;
-            }
+            self.defer_custom_font_for_frame = true;
             ctx.request_repaint();
         }
 

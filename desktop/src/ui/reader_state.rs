@@ -38,6 +38,8 @@ pub(crate) fn text_indent() -> f32 {
 /// Per-frame cache entry: (block_idx, galley, screen_rect, plain_text)
 pub(crate) type BlockGalleyEntry = (usize, Arc<egui::Galley>, egui::Rect, String);
 
+pub(crate) type CscCharMapCacheData = (u64, u32, u32, Vec<usize>);
+
 thread_local! {
     /// Collected during render_block, consumed by render_reader for selection state machine.
     pub(crate) static BLOCK_GALLEYS: RefCell<Vec<BlockGalleyEntry>> = const { RefCell::new(Vec::new()) };
@@ -52,7 +54,7 @@ thread_local! {
     /// Correction rects collected during render_block, consumed in render_reader for click detection.
     pub(crate) static CSC_RECTS: RefCell<Vec<CscRect>> = const { RefCell::new(Vec::new()) };
     /// Cache for `build_csc_char_mapping`: (content_hash, font_size_bits, max_width_bits) → mapping.
-    static CSC_CHAR_MAP_CACHE: RefCell<Option<(u64, u32, u32, Vec<usize>)>> = const { RefCell::new(None) };
+    static CSC_CHAR_MAP_CACHE: RefCell<Option<CscCharMapCacheData>> = const { RefCell::new(None) };
 }
 
 /// A clickable correction rect collected during rendering.

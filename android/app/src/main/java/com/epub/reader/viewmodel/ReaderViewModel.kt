@@ -136,6 +136,30 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
     var cscCorrections by mutableStateOf<List<CorrectionInfo>>(emptyList())
         private set
 
+    fun updateCorrectionStatus(correction: com.zhongbai233.epub.reader.ui.reader.CscBlockCorrection, newStatus: com.zhongbai233.epub.reader.csc.CorrectionStatus) {
+        cscCorrections = cscCorrections.map { c ->
+            if (c.charOffset == correction.globalCharOffset) c.copy(status = newStatus) else c
+        }
+        // Persist to BookConfig
+        val bookId = currentBookId ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val payload = org.json.JSONObject().apply {
+                    put("chapter", currentChapter)
+                    put("block_idx", correction.blockIndex)
+                    put("char_offset", correction.globalCharOffset)
+                    put("original", correction.original)
+                    put("corrected", correction.corrected)
+                    put("status", newStatus.name.lowercase())
+                }.toString()
+                RustBridge.upsertCorrection(dataDir, bookId, payload)
+                reloadBookConfig(dataDir, bookId)
+            } catch (e: Exception) {
+                android.util.Log.e("ReaderViewModel", "upsertCorrection failed", e)
+            }
+        }
+    }
+
     // ---- ����״̬ ----
     var isLoading by mutableStateOf(false)
         private set
@@ -888,14 +912,17 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun updateCscMode(value: String) {
+        android.util.Log.d("CscEngine", "updateCscMode: old=$cscMode new=$value isReady=${cscEngine.isReady} loading=$cscModelLoading")
         cscMode = value
         persistSettings()
         // If enabling CSC, try to load model
         if (value != "none" && !cscEngine.isReady && !cscModelLoading) {
+            android.util.Log.d("CscEngine", "updateCscMode: loading model")
             loadCscModel()
         }
         // If model is ready and mode changed, re-run check on current chapter
         if (cscEngine.isReady && value != "none") {
+            android.util.Log.d("CscEngine", "updateCscMode: running check")
             runCscCheckOnCurrentChapter()
         }
         if (value == "none") {
@@ -971,14 +998,21 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private fun runCscCheckOnCurrentChapter() {
-        val book = currentBook ?: return
-        val chapter = book.chapters.getOrNull(currentChapter) ?: return
+        val book = currentBook ?: run {
+            android.util.Log.d("CscEngine", "runCscCheck: currentBook is null, skipping")
+            return
+        }
+        val chapter = book.chapters.getOrNull(currentChapter) ?: run {
+            android.util.Log.d("CscEngine", "runCscCheck: chapter[$currentChapter] is null, skipping")
+            return
+        }
         val threshold = when (cscThreshold) {
-            "strict" -> 0.95f
+            "conservative" -> 0.95f
             "standard" -> 0.90f
-            "loose" -> 0.80f
+            "aggressive" -> 0.80f
             else -> 0.90f
         }
+        android.util.Log.d("CscEngine", "runCscCheck: threshold=$cscThreshold($threshold) blocks=${chapter.blocks.size}")
         viewModelScope.launch(Dispatchers.IO) {
             val fullText = chapter.blocks
                 .mapNotNull { block ->
@@ -989,7 +1023,9 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
                     }
                 }
                 .joinToString("\n")
+            android.util.Log.d("CscEngine", "runCscCheck: fullTextLen=${fullText.length}")
             val results = cscEngine.check(fullText, threshold)
+            android.util.Log.d("CscEngine", "runCscCheck: results=${results.size}")
             withContext(Dispatchers.Main) {
                 cscCorrections = results
             }

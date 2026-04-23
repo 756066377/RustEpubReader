@@ -5,11 +5,85 @@ mod image;
 use std::collections::HashMap;
 use std::path::Path;
 
-use epub::doc::EpubDoc;
+use rbook::ebook::resource::ResourceKey;
+use rbook::epub::Epub as RbookEpub;
 
 use super::{Chapter, TocEntry};
 use html::parse_html_blocks;
 use image::load_referenced_images;
+
+fn resource_key_to_string(key: &ResourceKey<'_>) -> Option<String> {
+    match key {
+        ResourceKey::Value(value) => Some(value.as_ref().to_string()),
+        ResourceKey::Position(_) => None,
+    }
+}
+
+fn normalize_resource_path(path: &str) -> String {
+    let clean = path
+        .split('#')
+        .next()
+        .unwrap_or(path)
+        .split('?')
+        .next()
+        .unwrap_or(path)
+        .replace('\\', "/");
+    let absolute = clean.starts_with('/');
+    let mut parts = Vec::new();
+    for part in clean.split('/') {
+        match part {
+            "" | "." => {}
+            ".." => {
+                parts.pop();
+            }
+            _ => parts.push(part),
+        }
+    }
+    let joined = parts.join("/");
+    if absolute {
+        format!("/{joined}")
+    } else {
+        joined
+    }
+}
+
+fn resource_path_matches(resource_path: &str, candidate_path: &str) -> bool {
+    let resource_norm = normalize_resource_path(resource_path);
+    let candidate_norm = normalize_resource_path(candidate_path);
+    let resource_trim = resource_norm.trim_start_matches('/');
+    let candidate_trim = candidate_norm.trim_start_matches('/');
+    if resource_trim == candidate_trim
+        || resource_trim.ends_with(candidate_trim)
+        || candidate_trim.ends_with(resource_trim)
+    {
+        return true;
+    }
+    let resource_name = Path::new(resource_trim)
+        .file_name()
+        .map(|f| f.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let candidate_name = Path::new(candidate_trim)
+        .file_name()
+        .map(|f| f.to_string_lossy().to_string())
+        .unwrap_or_default();
+    !resource_name.is_empty() && resource_name == candidate_name
+}
+
+fn collect_toc_items(epub: &RbookEpub) -> Vec<(String, String)> {
+    let mut items = Vec::new();
+    if let Some(root) = epub.toc().contents() {
+        for entry in root.flatten() {
+            let Some(manifest_entry) = entry.manifest_entry() else {
+                continue;
+            };
+            let Some(path) = resource_key_to_string(manifest_entry.resource().key()) else {
+                continue;
+            };
+            items.push((entry.label().to_string(), normalize_resource_path(&path)));
+        }
+    }
+    items
+}
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct EpubBook {
@@ -50,109 +124,87 @@ pub struct EpubMetadata {
 
 impl EpubBook {
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, String> {
-        let mut doc = EpubDoc::new(path).map_err(|e| format!("无法打开 EPUB 文件: {e}"))?;
+        let epub = RbookEpub::open(path).map_err(|e| format!("无法打开 EPUB 文件: {e}"))?;
+        let metadata = epub.metadata();
 
-        let title = doc
-            .mdata("title")
-            .map(|item| item.value.clone())
+        let title = metadata
+            .title()
+            .map(|item| item.value().to_string())
             .unwrap_or_else(|| "未知书名".to_string());
 
-        let cover_path = doc
-            .get_cover_id()
-            .and_then(|id| doc.resources.get(&id).map(|r| r.path.clone()));
-        let cover_data = cover_path.and_then(|p| doc.get_resource_by_path(&p));
+        let cover_data = epub
+            .manifest()
+            .cover_image()
+            .and_then(|entry| entry.read_bytes().ok());
 
         let mut chapters = Vec::new();
         let mut toc = Vec::new();
 
-        // Build path index for image resources (lazy: data loaded only when referenced)
-        let image_path_index: HashMap<String, std::path::PathBuf> = doc
-            .resources
-            .values()
-            .filter(|r| r.mime.starts_with("image/"))
-            .map(|r| (r.path.to_string_lossy().to_string(), r.path.clone()))
+        // Build image resource path index (lazy: bytes loaded only when referenced)
+        let image_resource_paths: Vec<String> = epub
+            .manifest()
+            .images()
+            .filter_map(|entry| resource_key_to_string(entry.resource().key()))
+            .map(|path| normalize_resource_path(&path))
             .collect();
         let mut image_resources: HashMap<String, Vec<u8>> = HashMap::new();
 
-        let toc_items: Vec<(String, String)> = doc
-            .toc
-            .iter()
-            .map(|nav| {
-                let label = nav.label.clone();
-                let raw = nav.content.to_string_lossy().to_string();
-                let path_part = raw.split('#').next().unwrap_or(&raw).to_string();
-                (label, path_part)
-            })
-            .collect();
+        let toc_items = collect_toc_items(&epub);
 
-        let spine: Vec<_> = doc.spine.iter().map(|s| s.idref.clone()).collect();
-        for spine_id in &spine {
-            let resource = doc.resources.get(spine_id).cloned();
-            if let Some(res) = resource {
-                if !res.mime.starts_with("application/xhtml") && !res.mime.starts_with("text/html")
-                {
-                    continue;
-                }
+        for spine_entry in epub.spine().iter() {
+            let Some(manifest_entry) = spine_entry.manifest_entry() else {
+                continue;
+            };
+            let kind = manifest_entry.kind().as_str().to_string();
+            if !kind.starts_with("application/xhtml") && !kind.starts_with("text/html") {
+                continue;
+            }
 
-                let content_bytes = doc
-                    .get_resource_by_path(&res.path)
-                    .ok_or_else(|| format!("无法读取资源: {}", res.path.display()))?;
+            let Some(raw_path) = resource_key_to_string(manifest_entry.resource().key()) else {
+                continue;
+            };
+            let path_str = normalize_resource_path(&raw_path);
+            let html = manifest_entry
+                .read_str()
+                .map_err(|e| format!("无法读取资源: {path_str}: {e}"))?;
 
-                let html = String::from_utf8_lossy(&content_bytes).to_string();
+            // Lazy-load: only fetch images referenced by this chapter (not all EPUB images)
+            load_referenced_images(
+                &html,
+                &path_str,
+                &image_resource_paths,
+                &mut image_resources,
+                |resolved| epub.read_resource_bytes(resolved).ok(),
+            );
 
-                // Lazy-load: only fetch images referenced by this chapter (not all EPUB images)
-                load_referenced_images(
-                    &html,
-                    &res.path.to_string_lossy(),
-                    &image_path_index,
-                    &mut image_resources,
-                    &mut doc,
-                );
+            let blocks = parse_html_blocks(&html, &path_str, &image_resources);
 
-                let blocks =
-                    parse_html_blocks(&html, &res.path.to_string_lossy(), &image_resources);
+            let chapter_title = toc_items
+                .iter()
+                .find(|(_, p)| resource_path_matches(&path_str, p))
+                .map(|(label, _)| label.clone())
+                .unwrap_or_else(|| format!("第 {} 章", chapters.len() + 1));
 
-                let path_str = res.path.to_string_lossy().to_string();
-                let path_filename = res
-                    .path
-                    .file_name()
-                    .map(|f| f.to_string_lossy().to_string())
-                    .unwrap_or_default();
+            if blocks.is_empty() {
+                continue;
+            }
 
-                let matches_toc = |p: &str| -> bool {
-                    let toc_filename = Path::new(p)
-                        .file_name()
-                        .map(|f| f.to_string_lossy().to_string())
-                        .unwrap_or_default();
-                    path_str.contains(p)
-                        || p.contains(&path_str)
-                        || (!toc_filename.is_empty() && toc_filename == path_filename)
-                };
+            let chapter_idx = chapters.len();
 
-                let chapter_title = toc_items
-                    .iter()
-                    .find(|(_, p)| matches_toc(p))
-                    .map(|(label, _)| label.clone())
-                    .unwrap_or_else(|| format!("第 {} 章", chapters.len() + 1));
+            chapters.push(Chapter {
+                title: chapter_title.clone(),
+                blocks,
+                source_href: Some(path_str.clone()),
+            });
 
-                if blocks.is_empty() {
-                    continue;
-                }
-
-                let chapter_idx = chapters.len();
-
-                chapters.push(Chapter {
-                    title: chapter_title.clone(),
-                    blocks,
-                    source_href: Some(path_str.clone()),
+            if toc_items
+                .iter()
+                .any(|(_, p)| resource_path_matches(&path_str, p))
+            {
+                toc.push(TocEntry {
+                    title: chapter_title,
+                    chapter_index: chapter_idx,
                 });
-
-                if toc_items.iter().any(|(_, p)| matches_toc(p)) {
-                    toc.push(TocEntry {
-                        title: chapter_title,
-                        chapter_index: chapter_idx,
-                    });
-                }
             }
         }
 
@@ -168,28 +220,16 @@ impl EpubBook {
         }
 
         let mut fonts = Vec::new();
-        let font_mimes = [
-            "application/x-font-ttf",
-            "font/ttf",
-            "font/otf",
-            "application/vnd.ms-opentype",
-            "application/x-font-opentype",
-            "font/sfnt",
-        ];
-        let resource_list: Vec<_> = doc
-            .resources
-            .values()
-            .map(|r| (r.path.clone(), r.mime.clone()))
-            .collect();
-        for (path, mime) in &resource_list {
-            if font_mimes.iter().any(|m| mime.eq_ignore_ascii_case(m)) {
-                if let Some(data) = doc.get_resource_by_path(path) {
-                    let name = path
-                        .file_stem()
-                        .map(|s| s.to_string_lossy().to_string())
-                        .unwrap_or_else(|| "EmbeddedFont".to_string());
-                    fonts.push((name, data));
-                }
+        for entry in epub.manifest().fonts() {
+            if let Ok(data) = entry.read_bytes() {
+                let name = resource_key_to_string(entry.resource().key())
+                    .and_then(|path| {
+                        Path::new(&path)
+                            .file_stem()
+                            .map(|s| s.to_string_lossy().to_string())
+                    })
+                    .unwrap_or_else(|| "EmbeddedFont".to_string());
+                fonts.push((name, data));
             }
         }
 
@@ -209,26 +249,53 @@ impl EpubBook {
 
     /// Read only the title metadata from an epub file without full parsing.
     pub fn read_title<P: AsRef<Path>>(path: P) -> Option<String> {
-        let doc = EpubDoc::new(path).ok()?;
-        doc.mdata("title").map(|item| item.value.clone())
+        let epub = RbookEpub::options()
+            .skip_toc(true)
+            .skip_manifest(true)
+            .skip_spine(true)
+            .open(path)
+            .ok()?;
+        epub.metadata().title().map(|item| item.value().to_string())
     }
 
     /// Read all available Dublin Core metadata from an epub file without full parsing.
     pub fn read_metadata<P: AsRef<Path>>(path: P) -> Option<EpubMetadata> {
-        let doc = EpubDoc::new(path).ok()?;
-        let get = |key: &str| doc.mdata(key).map(|item| item.value.clone());
+        let epub = RbookEpub::options()
+            .skip_toc(true)
+            .skip_manifest(true)
+            .skip_spine(true)
+            .open(path)
+            .ok()?;
+        let metadata = epub.metadata();
+        let title = metadata.title().map(|item| item.value().to_string());
+        let author = metadata
+            .creators()
+            .next()
+            .map(|item| item.value().to_string());
+        let publisher = metadata
+            .publishers()
+            .next()
+            .map(|item| item.value().to_string());
+        let identifier = metadata.identifier().map(|item| item.value().to_string());
+        let description = metadata.description().map(|item| item.value().to_string());
+        let contributor = metadata
+            .contributors()
+            .next()
+            .map(|item| item.value().to_string());
+        let chapter_count = Some(epub.spine().len());
+
         Some(EpubMetadata {
-            title: get("title"),
-            author: get("creator"),
-            publisher: get("publisher"),
-            language: get("language"),
-            identifier: get("identifier"),
-            description: get("description"),
-            subject: get("subject"),
-            date: get("date"),
-            rights: get("rights"),
-            contributor: get("contributor"),
-            chapter_count: Some(doc.spine.len()),
+            title,
+            author,
+            publisher,
+            language: None,
+            identifier,
+            description,
+            subject: None,
+            date: None,
+            rights: None,
+            contributor,
+            chapter_count,
         })
     }
 }

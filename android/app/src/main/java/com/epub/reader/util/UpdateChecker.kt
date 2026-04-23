@@ -21,7 +21,8 @@ object UpdateChecker {
     data class UpdateInfo(
         val tagName: String,
         val releaseName: String,
-        val downloadUrl: String
+        val cdnDownloadUrl: String,
+        val githubDownloadUrl: String
     )
 
     /**
@@ -55,28 +56,28 @@ object UpdateChecker {
                 return@withContext null
             }
 
+            val releasePageUrl = "https://github.com/$OWNER/$REPO/releases/tag/$tagName"
+
             // 查找 Android APK 资产
             val assets = json.optJSONArray("assets") ?: return@withContext null
-            var apkUrl: String? = null
+            var githubDownloadUrl: String? = null
             for (i in 0 until assets.length()) {
                 val asset = assets.getJSONObject(i)
                 val name = asset.optString("name", "")
                 if (name.contains("Android") && name.endsWith(".apk")) {
-                    val originalUrl = asset.optString("browser_download_url", "")
-                    apkUrl = getAcceleratedUrl(originalUrl)
+                    githubDownloadUrl = asset.optString("browser_download_url", "")
                     break
                 }
             }
 
-            if (apkUrl == null) {
-                // 回退到 release 页面
-                apkUrl = "https://github.com/$OWNER/$REPO/releases/tag/$tagName"
-            }
+            val resolvedGithubUrl = githubDownloadUrl?.takeIf { it.isNotBlank() } ?: releasePageUrl
+            val resolvedCdnUrl = getAcceleratedUrl(resolvedGithubUrl)
 
             UpdateInfo(
                 tagName = tagName,
                 releaseName = releaseName,
-                downloadUrl = apkUrl
+                cdnDownloadUrl = resolvedCdnUrl,
+                githubDownloadUrl = resolvedGithubUrl
             )
         } catch (e: Exception) {
             Log.e(TAG, "Failed to check for updates", e)
