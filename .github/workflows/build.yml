@@ -108,7 +108,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          cp target/release/$BINARY_NAME.exe "dist/RustEpubReader-WinArm64-${GITHUB_REF_NAME}.exe"
+          SAFE_REF_NAME="${GITHUB_REF_NAME//\//-}"
+          cp target/release/$BINARY_NAME.exe "dist/RustEpubReader-WinArm64-${SAFE_REF_NAME}.exe"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -157,7 +158,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          cp target/release/$BINARY_NAME "dist/RustEpubReader-macOS_arm64-${GITHUB_REF_NAME}"
+          SAFE_REF_NAME="${GITHUB_REF_NAME//\//-}"
+          cp target/release/$BINARY_NAME "dist/RustEpubReader-macOS_arm64-${SAFE_REF_NAME}"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -208,7 +210,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          cp target/x86_64-apple-darwin/release/$BINARY_NAME "dist/RustEpubReader-macOS_amd64-${GITHUB_REF_NAME}"
+          SAFE_REF_NAME="${GITHUB_REF_NAME//\//-}"
+          cp target/x86_64-apple-darwin/release/$BINARY_NAME "dist/RustEpubReader-macOS_amd64-${SAFE_REF_NAME}"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -307,6 +310,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
+          SAFE_REF_NAME="${GITHUB_REF_NAME//\//-}"
           shopt -s nullglob
           # ABI splits produce one APK per ABI; copy each, naming by ABI.
           # Expected names like app-arm64-v8a-release.apk / app-x86_64-release.apk
@@ -318,7 +322,7 @@ jobs:
             if [ -z "$abi" ]; then
               abi="universal"
             fi
-            cp "$apk" "dist/RustEpubReader-Android-${abi}-${GITHUB_REF_NAME}.apk"
+            cp "$apk" "dist/RustEpubReader-Android-${abi}-${SAFE_REF_NAME}.apk"
             found=$((found+1))
           done
           if [ "$found" -eq 0 ]; then
