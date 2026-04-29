@@ -29,6 +29,12 @@ impl ReaderApp {
             {
                 self.flush_reading_stats();
                 self.view = AppView::Library;
+                // Reset review panel state when returning to library
+                self.show_review_panel = false;
+                self.review_panel_chapter = None;
+                self.review_panel_anchor = None;
+                self.review_panel_just_opened = false;
+                self.review_panel_scroll_offset = None;
             }
             ui.add_space(2.0);
             if ui
@@ -85,6 +91,10 @@ impl ReaderApp {
                         .clicked()
                     {
                         self.show_settings = !self.show_settings;
+                        if self.show_settings {
+                            self.show_search = false;
+                            self.show_annotations = false;
+                        }
                     }
 
                     ui.separator();
@@ -96,6 +106,7 @@ impl ReaderApp {
                     {
                         self.show_search = !self.show_search;
                         if self.show_search {
+                            self.show_settings = false;
                             self.show_annotations = false;
                         }
                     }
@@ -107,6 +118,7 @@ impl ReaderApp {
                     {
                         self.show_annotations = !self.show_annotations;
                         if self.show_annotations {
+                            self.show_settings = false;
                             self.show_search = false;
                         }
                     }
@@ -180,6 +192,10 @@ impl ReaderApp {
                             .clicked()
                         {
                             self.show_settings = !self.show_settings;
+                            if self.show_settings {
+                                self.show_search = false;
+                                self.show_annotations = false;
+                            }
                             ui.close_menu();
                         }
 
@@ -191,6 +207,7 @@ impl ReaderApp {
                         {
                             self.show_search = !self.show_search;
                             if self.show_search {
+                                self.show_settings = false;
                                 self.show_annotations = false;
                             }
                             ui.close_menu();
@@ -204,6 +221,7 @@ impl ReaderApp {
                         {
                             self.show_annotations = !self.show_annotations;
                             if self.show_annotations {
+                                self.show_settings = false;
                                 self.show_search = false;
                             }
                             ui.close_menu();
@@ -290,6 +308,9 @@ impl ReaderApp {
                         .clicked()
                     {
                         self.dark_mode = !self.dark_mode;
+                        self.show_settings = true;
+                        self.show_search = false;
+                        self.show_annotations = false;
                     }
 
                     ui.separator();

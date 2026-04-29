@@ -16,20 +16,27 @@ android {
         versionName = (project.findProperty("APP_VERSION_NAME") as String?) ?: "1.0.0"
         // Expose version to Kotlin code via BuildConfig
         buildConfigField("String", "APP_VERSION_NAME", "\"${versionName}\"")
+
+        // NOTE: We do NOT set `ndk.abiFilters` here on purpose. AGP 8 + Gradle 9
+        // refuses to start when defaultConfig.ndk.abiFilters and splits.abi
+        // filters are both set ("Conflicting configuration"). The ABI list is
+        // declared once in the `splits { abi { include(...) } }` block below;
+        // that single source of truth controls both packaging and which native
+        // libs ship in each per-ABI APK.
     }
 
     signingConfigs {
-        create("release") {
-            val keystoreFile = System.getenv("ANDROID_KEYSTORE_FILE")
-                ?: project.findProperty("ANDROID_KEYSTORE_FILE") as String?
-            val ksAlias = System.getenv("ANDROID_KEY_ALIAS")
-                ?: project.findProperty("ANDROID_KEY_ALIAS") as String?
-            val ksPassword = System.getenv("ANDROID_STORE_PASSWORD")
-                ?: project.findProperty("ANDROID_STORE_PASSWORD") as String?
-            val kPassword = System.getenv("ANDROID_KEY_PASSWORD")
-                ?: project.findProperty("ANDROID_KEY_PASSWORD") as String?
+        val keystoreFile = System.getenv("ANDROID_KEYSTORE_FILE")
+            ?: project.findProperty("ANDROID_KEYSTORE_FILE") as String?
+        val ksAlias = System.getenv("ANDROID_KEY_ALIAS")
+            ?: project.findProperty("ANDROID_KEY_ALIAS") as String?
+        val ksPassword = System.getenv("ANDROID_STORE_PASSWORD")
+            ?: project.findProperty("ANDROID_STORE_PASSWORD") as String?
+        val kPassword = System.getenv("ANDROID_KEY_PASSWORD")
+            ?: project.findProperty("ANDROID_KEY_PASSWORD") as String?
 
-            if (keystoreFile != null && ksAlias != null) {
+        if (!keystoreFile.isNullOrBlank() && !ksAlias.isNullOrBlank()) {
+            create("release") {
                 storeFile = file(keystoreFile)
                 keyAlias = ksAlias
                 storePassword = ksPassword
@@ -41,13 +48,66 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
             signingConfig = signingConfigs.findByName("release")
                 ?: signingConfigs.getByName("debug")
+            ndk {
+                debugSymbolLevel = "NONE"
+            }
         }
+    }
+
+    // Produce one APK per ABI (arm64-v8a, x86_64) instead of a fat universal APK.
+    // This roughly halves the install size for end users.
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a", "x86_64")
+            isUniversalApk = false
+        }
+    }
+
+    packaging {
+        jniLibs {
+            useLegacyPackaging = false
+            // Ask R8/AGP to keep .so files compressed-and-page-aligned only when needed.
+            keepDebugSymbols += listOf()
+            // Do NOT bundle ONNX Runtime native libs in the APK. They are
+            // downloaded on-demand to filesDir and dlopen'd by CscNativeLoader.
+            // This trims ~25 MB per ABI from the install size.
+            excludes += listOf(
+                "**/libonnxruntime.so",
+                "**/libonnxruntime4j_jni.so"
+            )
+        }
+        resources {
+            excludes += listOf(
+                "META-INF/*.kotlin_module",
+                "META-INF/AL2.0",
+                "META-INF/LGPL2.1",
+                "META-INF/DEPENDENCIES",
+                "META-INF/LICENSE",
+                "META-INF/LICENSE.txt",
+                "META-INF/LICENSE.md",
+                "META-INF/NOTICE",
+                "META-INF/NOTICE.txt",
+                "META-INF/NOTICE.md",
+                "META-INF/*.version",
+                "**/*.kotlin_metadata",
+                "kotlin-tooling-metadata.json"
+            )
+        }
+    }
+
+    bundle {
+        language { enableSplit = true }
+        density { enableSplit = true }
+        abi { enableSplit = true }
     }
 
     compileOptions {

@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use uuid::Uuid;
 
 use super::crypto;
 use super::protocol::*;
@@ -36,13 +37,13 @@ impl PeerStore {
             serde_json::from_str(&data).unwrap_or_default()
         } else {
             Self {
-                device_id: uuid_simple(),
+                device_id: Uuid::new_v4().to_string(),
                 device_name: hostname(),
                 ..Default::default()
             }
         };
         if store.device_id.is_empty() {
-            store.device_id = uuid_simple();
+            store.device_id = Uuid::new_v4().to_string();
         }
         if store.device_name.is_empty() {
             store.device_name = hostname();
@@ -97,13 +98,21 @@ impl PeerStore {
             let mut copy = self.clone();
             copy.private_key_pem.clear();
             if let Ok(json) = serde_json::to_string_pretty(&copy) {
-                let _ = std::fs::write(path, json);
+                let _ = std::fs::write(&path, json);
             }
         }
         #[cfg(not(feature = "keychain"))]
         {
             if let Ok(json) = serde_json::to_string_pretty(self) {
-                let _ = std::fs::write(path, json);
+                let _ = std::fs::write(&path, json);
+            }
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if let Ok(mut perm) = std::fs::metadata(&path).map(|m| m.permissions()) {
+                perm.set_mode(0o600);
+                let _ = std::fs::set_permissions(&path, perm);
             }
         }
     }
@@ -212,8 +221,14 @@ pub fn handle_client(
         .peer_addr()
         .map(|a| a.to_string())
         .unwrap_or("?".into());
+    stream
+        .set_read_timeout(Some(std::time::Duration::from_secs(30)))
+        .ok();
+    stream
+        .set_write_timeout(Some(std::time::Duration::from_secs(30)))
+        .ok();
     dbg_log!("SERVER: new client connection from {}", peer_addr);
-    dbg_log!("SERVER: expecting PIN = '{}'", pin);
+    dbg_log!("SERVER: expecting PIN (len={})", pin.len());
 
     let msg = read_message(stream)?;
     dbg_log!(
@@ -444,18 +459,13 @@ fn handle_pairing(
                 public_key_pem,
             } => {
                 dbg_log!(
-                    "PAIRING: received PairRequest, client_pin='{}' server_pin='{}' match={}",
-                    client_pin,
-                    pin,
+                    "PAIRING: received PairRequest, client_pin_len={} server_pin_len={} match={}",
+                    client_pin.len(),
+                    pin.len(),
                     client_pin == pin
                 );
-                dbg_log!(
-                    "PAIRING: client_pin bytes={:?} server_pin bytes={:?}",
-                    client_pin.as_bytes(),
-                    pin.as_bytes()
-                );
                 if client_pin == pin {
-                    let pairing_uuid = generate_uuid();
+                    let pairing_uuid = Uuid::new_v4().to_string();
                     dbg_log!("PAIRING: PIN matched! pairing_uuid={}", pairing_uuid);
                     let (device_id, device_name) = {
                         let s = store
@@ -1109,31 +1119,6 @@ fn find_book_by_hash(
     None
 }
 
-fn uuid_simple() -> String {
-    let mut buf = [0u8; 8];
-    use rand::RngCore;
-    rand::rngs::OsRng.fill_bytes(&mut buf);
-    format!("{:016x}", u64::from_be_bytes(buf))
-}
-
-fn generate_uuid() -> String {
-    let mut buf = [0u8; 16];
-    use rand::RngCore;
-    rand::rngs::OsRng.fill_bytes(&mut buf);
-    // RFC 4122 version 4
-    buf[6] = (buf[6] & 0x0f) | 0x40;
-    buf[8] = (buf[8] & 0x3f) | 0x80;
-    format!(
-        "{:08x}-{:04x}-{:04x}-{:04x}-{:012x}",
-        u32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]),
-        u16::from_be_bytes([buf[4], buf[5]]),
-        u16::from_be_bytes([buf[6], buf[7]]),
-        u16::from_be_bytes([buf[8], buf[9]]),
-        // last 6 bytes as u64
-        u64::from_be_bytes([0, 0, buf[10], buf[11], buf[12], buf[13], buf[14], buf[15]])
-    )
-}
-
 fn hostname() -> String {
     std::env::var("COMPUTERNAME")
         .or_else(|_| std::env::var("HOSTNAME"))
@@ -1172,11 +1157,14 @@ mod tests {
         let sd = server_data.clone();
         let pin = server_pin.to_string();
         let server_thread = std::thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            stream
-                .set_read_timeout(Some(std::time::Duration::from_secs(10)))
-                .ok();
-            handle_client(&mut stream, &sd, &sd, &pin, ss, &[])
+            if let Ok((mut stream, _)) = listener.accept() {
+                stream
+                    .set_read_timeout(Some(std::time::Duration::from_secs(10)))
+                    .ok();
+                handle_client(&mut stream, &sd, &sd, &pin, ss, &[])
+            } else {
+                Err("accept failed".into())
+            }
         });
 
         let result = connect_to_peer(
@@ -1230,11 +1218,12 @@ mod tests {
         let sd = server_data.clone();
         let pin = server_pin.to_string();
         let server_thread = std::thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            stream
-                .set_read_timeout(Some(std::time::Duration::from_secs(10)))
-                .ok();
-            let _ = handle_client(&mut stream, &sd, &sd, &pin, ss, &[]);
+            if let Ok((mut stream, _)) = listener.accept() {
+                stream
+                    .set_read_timeout(Some(std::time::Duration::from_secs(10)))
+                    .ok();
+                let _ = handle_client(&mut stream, &sd, &sd, &pin, ss, &[]);
+            }
         });
 
         let result = connect_to_peer(
@@ -1279,11 +1268,14 @@ mod tests {
         let sd = server_data.clone();
         let pin = server_pin.to_string();
         let t = std::thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            stream
-                .set_read_timeout(Some(std::time::Duration::from_secs(10)))
-                .ok();
-            handle_client(&mut stream, &sd, &sd, &pin, ss, &[])
+            if let Ok((mut stream, _)) = listener.accept() {
+                stream
+                    .set_read_timeout(Some(std::time::Duration::from_secs(10)))
+                    .ok();
+                handle_client(&mut stream, &sd, &sd, &pin, ss, &[])
+            } else {
+                Err("accept failed".into())
+            }
         });
 
         let result = connect_to_peer(
@@ -1304,11 +1296,14 @@ mod tests {
         let sd2 = server_data.clone();
         let pin2 = server_pin.to_string();
         let t2 = std::thread::spawn(move || {
-            let (mut stream, _) = listener2.accept().unwrap();
-            stream
-                .set_read_timeout(Some(std::time::Duration::from_secs(10)))
-                .ok();
-            handle_client(&mut stream, &sd2, &sd2, &pin2, ss2, &[])
+            if let Ok((mut stream, _)) = listener2.accept() {
+                stream
+                    .set_read_timeout(Some(std::time::Duration::from_secs(10)))
+                    .ok();
+                handle_client(&mut stream, &sd2, &sd2, &pin2, ss2, &[])
+            } else {
+                Err("accept failed".into())
+            }
         });
 
         // Re-connect — this time should use challenge-response, no PIN needed
@@ -1358,7 +1353,13 @@ mod tests {
             handle_client(&mut stream, &sd, &sd, &pin, ss, &[])
         });
 
-        let first = connect_to_peer(&addr, &mut client_store, &client_data, None, Some(server_pin));
+        let first = connect_to_peer(
+            &addr,
+            &mut client_store,
+            &client_data,
+            None,
+            Some(server_pin),
+        );
         assert!(
             first.is_ok(),
             "manual pairing without remote id failed: {:?}",
@@ -1420,7 +1421,7 @@ mod tests {
 
         let books_dir_str = books_dir.to_string_lossy().to_string();
         let external_str = external.to_string_lossy().to_string();
-        let books = list_local_books(&books_dir_str, &[external_str.clone()]);
+        let books = list_local_books(&books_dir_str, std::slice::from_ref(&external_str));
 
         assert_eq!(books.len(), 1);
         assert_eq!(
@@ -1483,11 +1484,14 @@ mod tests {
         let sd = server_data.clone();
         let pin = server_pin.to_string();
         let t = std::thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            stream
-                .set_read_timeout(Some(std::time::Duration::from_secs(10)))
-                .ok();
-            handle_client(&mut stream, &sd, &sd, &pin, ss, &[])
+            if let Ok((mut stream, _)) = listener.accept() {
+                stream
+                    .set_read_timeout(Some(std::time::Duration::from_secs(10)))
+                    .ok();
+                handle_client(&mut stream, &sd, &sd, &pin, ss, &[])
+            } else {
+                Err("accept failed".into())
+            }
         });
 
         let first = connect_to_peer(
@@ -1518,11 +1522,14 @@ mod tests {
         let sd2 = server_data.clone();
         let pin2 = server_pin.to_string();
         let t2 = std::thread::spawn(move || {
-            let (mut stream, _) = listener2.accept().unwrap();
-            stream
-                .set_read_timeout(Some(std::time::Duration::from_secs(10)))
-                .ok();
-            handle_client(&mut stream, &sd2, &sd2, &pin2, ss2, &[])
+            if let Ok((mut stream, _)) = listener2.accept() {
+                stream
+                    .set_read_timeout(Some(std::time::Duration::from_secs(10)))
+                    .ok();
+                handle_client(&mut stream, &sd2, &sd2, &pin2, ss2, &[])
+            } else {
+                Err("accept failed".into())
+            }
         });
 
         let second = connect_to_peer(

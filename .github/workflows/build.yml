@@ -18,7 +18,7 @@ env:
 
 jobs:
   build-windows:
-    name: Build (windows-amd64)
+    name: Build Windows Desktop
     runs-on: windows-latest
     steps:
       - name: Checkout repository
@@ -53,7 +53,7 @@ jobs:
       - name: Build release binary
         run: cargo build --release -p rust_epub_reader
 
-      - name: Bundle artifacts
+      - name: Bundle artifact
         shell: bash
         run: |
           set -euo pipefail
@@ -64,7 +64,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: windows-build
+          name: windows-desktop-build
           path: dist
 
   publish-release:
@@ -76,97 +76,17 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Download All Artifacts
+      - name: Download Windows artifact
         uses: actions/download-artifact@v4
         with:
+          name: windows-desktop-build
           path: release-artifacts
-
-      - name: List Artifacts
-        run: ls -R release-artifacts
-
-      - name: Generate Release Notes
-        id: generate_notes
-        uses: actions/github-script@v6
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          result-encoding: string
-          script: |
-            const owner = context.repo.owner;
-            const repo = context.repo.repo;
-            const tag = context.ref.replace('refs/tags/', '');
-            const releasesResp = await github.rest.repos.listReleases({ owner, repo, per_page: 100 });
-            const releases = releasesResp.data;
-            const tags = releases.map(r => r.tag_name);
-            const idx = tags.indexOf(tag);
-            const prev = idx < releases.length - 1 ? releases[idx+1] : null;
-            const prevTag = prev ? prev.tag_name : null;
-            const compareUrl = prevTag ? `https://github.com/${owner}/${repo}/compare/${prevTag}...${tag}` : '';
-
-            const closedStart = prev ? new Date(prev.published_at).toISOString() : null;
-            const closedEnd = new Date().toISOString();
-
-            let query = `repo:${owner}/${repo} is:issue is:closed`;
-            if (closedStart) {
-              query += ` closed:${closedStart}..${closedEnd}`;
-            }
-
-            const issues = await github.paginate(github.rest.search.issuesAndPullRequests, {
-              q: query,
-              per_page: 100
-            });
-
-            const negativeLabels = ['wontfix', 'duplicate', 'invalid'];
-            const groups = { Fix: [], Update: [], Feature: [] };
-            const seen = new Set();
-
-            for (const item of issues) {
-              if (seen.has(item.number)) continue;
-              seen.add(item.number);
-
-              const labels = (item.labels || []).map(l => typeof l === 'string' ? l : l.name);
-              const labelLowers = labels.map(l => String(l).toLowerCase());
-
-              if (labelLowers.some(l => negativeLabels.includes(l))) continue;
-              if (labelLowers.some(l => ['question'].includes(l))) continue;
-
-              if (labelLowers.some(l => ['bug'].includes(l))) {
-                groups.Fix.push(item);
-                continue;
-              }
-              if (labelLowers.some(l => ['enhancement', 'feature'].includes(l))) {
-                groups.Feature.push(item);
-                continue;
-              }
-              if (labelLowers.some(l => ['documentation', 'doc', 'update'].includes(l))) {
-                groups.Update.push(item);
-                continue;
-              }
-            }
-
-            let body = "# What's Changed\n\n";
-            const zh = { Fix: '修复', Update: '更新', Feature: '新增' };
-            for (const key of ['Fix','Update','Feature']) {
-              if (groups[key].length) {
-                body += `## ${key}\n\n`;
-                for (const i of groups[key]) {
-                  body += `- ${zh[key]}：[#${i.number}](${i.html_url}) ${i.title}\n`;
-                }
-                body += "\n";
-              }
-            }
-            if (compareUrl) {
-              body += `**Full Changelog**: ${compareUrl}\n`;
-            }
-            return body;
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
           name: RustEpubReader ${{ github.ref_name }}
-          body: ${{ steps.generate_notes.outputs.result }}
+          generate_release_notes: true
           files: |
-            release-artifacts/windows-build/RustEpubReader-Win64-*.exe
+            release-artifacts/RustEpubReader-Win64-*.exe
