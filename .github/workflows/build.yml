@@ -87,6 +87,22 @@ jobs:
         with:
           tag_name: ${{ github.ref_name }}
           name: RustEpubReader ${{ github.ref_name }}
-          generate_release_notes: true
+          body: |
+            ## v1.0.4
+
+            ### 新增
+            - Windows 桌面端段评面板入口与段评浏览能力。
+            - 动态中文纠错（CSC）插件加载支持。
+            - 阅读器工具栏段评入口与相关国际化文案。
+
+            ### 改进
+            - 同步上游 `zhongbai2333/RustEpubReader:main` 最新更新。
+            - 优化书库卡片布局、标题截断和阅读器部分交互细节。
+            - 优化分享/配对相关逻辑，降低敏感信息日志暴露风险。
+            - CI 发行版构建精简为仅生成 Windows 桌面端产物。
+
+            ### 修复
+            - 修复阅读器快捷键在输入框聚焦或面板打开时可能误触发的问题。
+            - 修复合并上游后 `Cargo.lock`、国际化文件和桌面端入口的冲突。
           files: |
             release-artifacts/RustEpubReader-Win64-*.exe
