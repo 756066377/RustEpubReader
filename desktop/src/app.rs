@@ -824,7 +824,7 @@ impl AppSettings {
             reader_page_animation_speed: app.reader_page_animation_speed,
             reader_bg_image_path: app.reader_bg_image_path.clone(),
             reader_bg_image_alpha: app.reader_bg_image_alpha,
-            scroll_mode: app.scroll_mode,
+            scroll_mode: true,
             show_toc: app.show_toc,
             reader_toolbar_visible: app.reader_toolbar_visible,
             language: app.i18n.language().code().to_string(),
@@ -864,7 +864,7 @@ impl AppSettings {
         app.reader_page_animation_speed = self.reader_page_animation_speed.clamp(0.04, 0.40);
         app.reader_bg_image_path = self.reader_bg_image_path.clone();
         app.reader_bg_image_alpha = self.reader_bg_image_alpha.clamp(0.0, 1.0);
-        app.scroll_mode = self.scroll_mode;
+        app.scroll_mode = true;
         app.show_toc = self.show_toc;
         app.reader_toolbar_visible = self.reader_toolbar_visible;
         app.auto_start_sharing = self.auto_start_sharing;
@@ -3064,54 +3064,6 @@ impl eframe::App for ReaderApp {
             self.pages_dirty = true;
             self.defer_custom_font_for_frame = true;
             ctx.request_repaint();
-        }
-
-        if self.view == AppView::Reader
-            && !self.show_sharing_panel
-            && !self.show_review_panel
-            && !ctx.wants_keyboard_input()
-        {
-            ctx.input(|i| {
-                if !self.scroll_mode {
-                    if i.key_pressed(egui::Key::A) {
-                        self.prev_chapter();
-                    }
-                    if i.key_pressed(egui::Key::D) {
-                        self.next_chapter();
-                    }
-                }
-                if i.key_pressed(egui::Key::ArrowLeft) {
-                    if self.scroll_mode {
-                        self.prev_chapter();
-                    } else if self.is_dual_column {
-                        if self.current_page >= 2 {
-                            self.trigger_page_animation_to(self.current_page - 2, -1.0);
-                        } else if self.current_chapter > 0 {
-                            self.capture_cross_chapter_snapshot();
-                            self.prev_chapter();
-                            self.current_page = usize::MAX;
-                            self.start_cross_chapter_animation(-1.0);
-                        }
-                    } else {
-                        self.prev_page();
-                    }
-                }
-                if i.key_pressed(egui::Key::ArrowRight) {
-                    if self.scroll_mode {
-                        self.next_chapter();
-                    } else if self.is_dual_column {
-                        if self.current_page + 2 < self.total_pages {
-                            self.trigger_page_animation_to(self.current_page + 2, 1.0);
-                        } else {
-                            self.capture_cross_chapter_snapshot();
-                            self.next_chapter();
-                            self.start_cross_chapter_animation(1.0);
-                        }
-                    } else {
-                        self.next_page();
-                    }
-                }
-            });
         }
 
         if let Some(err) = self.error_msg.clone() {

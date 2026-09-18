@@ -134,25 +134,6 @@ impl ReaderApp {
             }
         });
 
-        // Reading mode
-        ui.horizontal_wrapped(|ui| {
-            ui.label(self.i18n.t("settings.reading_mode"));
-            if ui
-                .selectable_label(self.scroll_mode, self.i18n.t("settings.scroll"))
-                .clicked()
-            {
-                self.scroll_mode = true;
-                self.pages_dirty = true;
-            }
-            if ui
-                .selectable_label(!self.scroll_mode, self.i18n.t("settings.paging"))
-                .clicked()
-            {
-                self.scroll_mode = false;
-                self.pages_dirty = true;
-            }
-        });
-
         // Line spacing
         ui.horizontal(|ui| {
             ui.label(self.i18n.t("settings.line_spacing"));
@@ -369,32 +350,6 @@ impl ReaderApp {
                 },
             );
         });
-
-        // Page animation
-        ui.horizontal_wrapped(|ui| {
-            ui.label(self.i18n.t("settings.page_animation"));
-            for mode in ["Slide", "Cover", "None"] {
-                let label = match mode {
-                    "Slide" => self.i18n.t("settings.slide"),
-                    "Cover" => self.i18n.t("settings.cover"),
-                    _ => self.i18n.t("settings.none"),
-                };
-                if ui
-                    .selectable_label(self.reader_page_animation == mode, label)
-                    .clicked()
-                {
-                    self.reader_page_animation = mode.to_string();
-                }
-            }
-        });
-        if self.reader_page_animation != "None" {
-            ui.add_space(4.0);
-            ui.label(self.i18n.t("settings.animation_speed"));
-            ui.add_sized(
-                [ui.available_width().min(250.0), 18.0],
-                egui::Slider::new(&mut self.reader_page_animation_speed, 0.04..=0.40).step_by(0.02),
-            );
-        }
 
         ui.add_space(8.0);
         ui.separator();

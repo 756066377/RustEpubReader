@@ -82,19 +82,20 @@ jobs:
           tag_name: ${{ github.ref_name }}
           name: RustEpubReader ${{ github.ref_name }}
           body: |
-            ## v1.0.11
+            ## v1.0.12
 
             Windows 64 位隐蔽阅读发行版。
 
             ### 改进
-            - 新用户首次打开默认使用滚动模式（已有设置不受影响）。
-            - 选项栏右侧不再显示当前章节数。
+            - 移除翻页模式，阅读只保留瀑布流滚动。
+            - 选项栏和设置里不再提供滚动 / 翻页切换。
+            - 原先使用翻页模式的用户会自动切到滚动模式。
 
             ### 说明
-            - 基于 v1.0.10。
+            - 基于 v1.0.11。
             - CI 发行版构建仍只生成 Windows 桌面端产物。
 
             ### 下载
-            - `RustEpubReader-Win64-v1.0.11.exe`
+            - `RustEpubReader-Win64-v1.0.12.exe`
           files: |
             release-artifacts/RustEpubReader-Win64-*.exe

@@ -72,21 +72,6 @@ impl ReaderApp {
                     }
                 }
 
-                let mode_tip = if self.scroll_mode {
-                    self.i18n.t("toolbar.scroll_mode").to_string()
-                } else {
-                    self.i18n.t("toolbar.page_mode").to_string()
-                };
-                let mode_label = if self.scroll_mode { "📜" } else { "📄" };
-                if ui
-                    .button(egui::RichText::new(mode_label).size(btn_size))
-                    .on_hover_text(&mode_tip)
-                    .clicked()
-                {
-                    self.scroll_mode = !self.scroll_mode;
-                    self.pages_dirty = true;
-                }
-
                 if !compact {
                     let settings_tip = self.i18n.t("toolbar.reading_settings").to_string();
                     if toggle_btn(ui, self.show_settings, "⚙", btn_size)
