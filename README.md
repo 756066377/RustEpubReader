@@ -1,16 +1,30 @@
 # RustEpubReader
 
-一个基于 Rust 的 EPUB 阅读器，目前只保留 **Windows 64 位（x86_64）** 支持，并针对“隐蔽阅读 / 办公摸鱼”场景做了较多调整。
+**v1.0.9** · Windows 64 位隐蔽 EPUB 阅读器
 
-## 这次版本的重点
+本仓库只保留 **Windows x86_64** 桌面端，并针对“隐蔽阅读 / 办公摸鱼”做了调整。上游能力已同步到 `zhongbai2333/RustEpubReader` v1.0.8。
 
-这个分支不再追求多端兼容，核心目标很明确：
+## 下载
 
-- 在 Windows 桌面上提供一个更隐蔽、更轻量的阅读器
-- 去掉传统标题栏和任务栏暴露
-- 让阅读界面更像一层可控的阅读浮层，而不是一个普通应用窗口
+从 [GitHub Releases](https://github.com/756066377/RustEpubReader/releases/latest) 下载：
 
-当前版本已同步上游 `zhongbai2333/RustEpubReader` 到 v1.0.8，并保留本分支的隐蔽阅读改动。
+- `RustEpubReader-Win64-v1.0.9.exe`
+
+也可以在 [Actions](https://github.com/756066377/RustEpubReader/actions) 里取最新 `windows-desktop-build` 产物（开发构建，文件名带分支名）。
+
+## v1.0.9 更新
+
+相对本仓库上一版 v1.0.4：
+
+- 同步上游到 v1.0.8
+- 滚动模式支持连续跨章节阅读
+- TTS 连续朗读，以及全书朗读完毕状态
+- 块级阅读进度保存，可跨设备同步
+- 标题字号倍率；标点跟随所选字体
+- 命令行直接打开 `.epub` / `.txt`
+- 应用内检查更新改为使用本仓库 Release
+
+隐蔽阅读相关能力保持不变。
 
 ## 隐蔽阅读特性
 
@@ -72,8 +86,6 @@
 
 ## 阅读能力
 
-除了隐蔽性调整，这个版本仍保留常规阅读能力：
-
 - EPUB 打开与书库记录
 - 块级阅读进度保存，并支持跨设备同步
 - 滚动 / 翻页两种模式；滚动模式支持连续跨章节阅读
@@ -92,22 +104,14 @@ RustEpubReader/
 
 ## 构建
 
-本项目当前面向 Windows 64 位：
+本项目在 GitHub Actions 上编译 Windows 发行包。本地如需自行构建：
 
 ```bash
 cargo build --release -p rust_epub_reader
 ```
 
-如果你本地缺少完整的 Windows MSVC 工具链，也可以直接使用 GitHub Actions 进行编译。
-
-## GitHub Actions 构建产物
-
-仓库已经配置了 Windows 构建工作流。  
-推送代码后，GitHub Actions 会自动生成：
-
-- `RustEpubReader-Win64-<branch>.exe`
-
-你可以在对应 workflow run 的 artifact 中下载编译结果。
+推送 `main` 或打 `v*` 标签后，Actions 会生成 `RustEpubReader-Win64-<ref>.exe`。  
+打 `v*` 标签还会自动发布 GitHub Release。
 
 ## 当前定位
 

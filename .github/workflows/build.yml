@@ -4,12 +4,6 @@ on:
   push:
     branches: [ "**" ]
     tags: [ "v*" ]
-    paths:
-      - "core/**"
-      - "desktop/**"
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - ".github/workflows/build.yml"
   workflow_dispatch:
 
 env:
@@ -88,7 +82,9 @@ jobs:
           tag_name: ${{ github.ref_name }}
           name: RustEpubReader ${{ github.ref_name }}
           body: |
-            ## v1.0.8
+            ## v1.0.9
+
+            Windows 64 位隐蔽阅读发行版。相对 v1.0.4，已同步上游到 v1.0.8。
 
             ### 新增
             - 滚动模式支持连续跨章节阅读。
@@ -100,10 +96,11 @@ jobs:
             ### 改进
             - 同步上游 `zhongbai2333/RustEpubReader:main` 到 v1.0.8。
             - 标点符号跟随所选字体对齐。
+            - 应用内检查更新改为使用本仓库 GitHub Release。
             - 保留本分支的 Windows 隐蔽阅读能力（无标题栏、Boss Key、F2 收起界面等）。
             - CI 发行版构建仍只生成 Windows 桌面端产物。
 
-            ### 修复
-            - 修复合并上游后阅读器、窗口入口和 CI 工作流冲突。
+            ### 下载
+            - `RustEpubReader-Win64-v1.0.9.exe`
           files: |
             release-artifacts/RustEpubReader-Win64-*.exe

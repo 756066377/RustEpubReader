@@ -3,7 +3,7 @@
 //! 参考 Tomato-Novel-Downloader 的 self_update 设计移植：
 //! - 通过 GitHub Releases API 获取最新版本
 //! - 选择匹配当前平台/架构的资产
-//! - 可选使用 `https://dl.zhongbai233.com/` 加速（可通过 `RER_DISABLE_ACCEL=1` 禁用）
+//! - 从本仓库 GitHub Releases 下载 Windows 产物
 //! - 下载后按需校验 SHA256（若 Release 资产提供 digest）
 //! - Windows 使用临时 .bat 进行替换并重启；Unix 直接替换并重启
 
@@ -21,7 +21,7 @@ use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use tempfile::TempDir;
 
-const OWNER: &str = "zhongbai2333";
+const OWNER: &str = "756066377";
 const REPO: &str = "RustEpubReader";
 
 /// 当前编译版本号（来自 Cargo.toml）
@@ -258,29 +258,8 @@ fn get_latest_release_asset() -> Result<MatchedAsset> {
     ))
 }
 
-fn get_accelerated_url(original_url: &str) -> String {
-    // https://github.com/<owner>/<repo>/releases/download/<tag>/<asset>
-    // → https://dl.zhongbai233.com/release/<tag>/<asset>
-    if let Some(tail) = original_url.split("/releases/download/").nth(1) {
-        format!("https://dl.zhongbai233.com/release/{tail}")
-    } else {
-        original_url.to_string()
-    }
-}
-
 fn build_download_urls(original_url: &str) -> Vec<String> {
-    let accel_disabled = std::env::var("RER_DISABLE_ACCEL").ok().as_deref() == Some("1");
-    let mut urls = Vec::new();
-
-    if !accel_disabled {
-        let accelerated = get_accelerated_url(original_url);
-        if accelerated != original_url {
-            urls.push(accelerated);
-        }
-    }
-
-    urls.push(original_url.to_string());
-    urls
+    vec![original_url.to_string()]
 }
 
 fn start_update(matched: &MatchedAsset, on_progress: Option<ProgressCallback>) -> Result<()> {
@@ -550,23 +529,12 @@ fn windows_apply_and_restart(tmp_file: &Path) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_download_urls, get_accelerated_url};
+    use super::build_download_urls;
 
     #[test]
-    fn accelerated_url_maps_github_release_path() {
-        let original = "https://github.com/zhongbai2333/RustEpubReader/releases/download/v1.0.2/RustEpubReader-Win64-v1.0.2.exe";
-        let accelerated = get_accelerated_url(original);
-        assert_eq!(
-            accelerated,
-            "https://dl.zhongbai233.com/release/v1.0.2/RustEpubReader-Win64-v1.0.2.exe"
-        );
-    }
-
-    #[test]
-    fn download_urls_include_github_fallback() {
-        let original = "https://github.com/zhongbai2333/RustEpubReader/releases/download/v1.0.2/RustEpubReader-Win64-v1.0.2.exe";
+    fn download_urls_use_this_fork_github_release() {
+        let original = "https://github.com/756066377/RustEpubReader/releases/download/v1.0.9/RustEpubReader-Win64-v1.0.9.exe";
         let urls = build_download_urls(original);
-        assert_eq!(urls.len(), 2);
-        assert_eq!(urls[1], original);
+        assert_eq!(urls, vec![original]);
     }
 }
