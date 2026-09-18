@@ -8,6 +8,72 @@ use reader_core::epub::{ContentBlock, InlineStyle, TextSpan};
 
 use super::reader_state::*;
 
+fn family_from_name(name: &str) -> FontFamily {
+    match name {
+        "Monospace" => FontFamily::Monospace,
+        "Serif" => FontFamily::Name("Serif".into()),
+        "Sans" => FontFamily::Proportional,
+        other => FontFamily::Name(other.into()),
+    }
+}
+
+fn uses_cjk_font(ch: char) -> bool {
+    matches!(
+        ch as u32,
+        0x3400..=0x4DBF
+            | 0x4E00..=0x9FFF
+            | 0xF900..=0xFAFF
+            | 0x3040..=0x30FF
+            | 0x2018
+            | 0x2019
+            | 0x201C
+            | 0x201D
+            | 0x3000..=0x303F
+            | 0xFE10..=0xFE1F
+            | 0xFE30..=0xFE4F
+            | 0xFF01..=0xFF65
+    )
+}
+
+fn append_font_runs(
+    job: &mut LayoutJob,
+    text: &str,
+    leading: f32,
+    base_format: TextFormat,
+    cjk_family: &FontFamily,
+) {
+    if base_format.font_id.family == *cjk_family {
+        job.append(text, leading, base_format);
+        return;
+    }
+    let mut chars = text.char_indices();
+    let Some((_, first)) = chars.next() else {
+        return;
+    };
+    let mut run_start = 0;
+    let mut run_is_cjk = uses_cjk_font(first);
+    let mut first_run = true;
+
+    for (index, ch) in chars.chain(std::iter::once((text.len(), '\0'))) {
+        let is_cjk = index < text.len() && uses_cjk_font(ch);
+        if index < text.len() && is_cjk == run_is_cjk {
+            continue;
+        }
+        let mut format = base_format.clone();
+        if run_is_cjk {
+            format.font_id = FontId::new(format.font_id.size, cjk_family.clone());
+        }
+        job.append(
+            &text[run_start..index],
+            if first_run { leading } else { 0.0 },
+            format,
+        );
+        first_run = false;
+        run_start = index;
+        run_is_cjk = is_cjk;
+    }
+}
+
 // ── Content layout (was `ReaderApp::render_content_layout`, no `&self`) ──
 
 #[allow(clippy::too_many_arguments)]
@@ -21,6 +87,7 @@ pub(crate) fn render_content_layout(
     block_end: usize,
     show_title: bool,
     font_size: f32,
+    title_font_scale: f32,
     bg_color: Color32,
     current_chapter: usize,
     total_ch: usize,
@@ -42,8 +109,8 @@ pub(crate) fn render_content_layout(
         .inner_margin(egui::Margin {
             left: 0,
             right: 0,
-            top: 48,
-            bottom: 56,
+            top: READER_CONTENT_TOP_PADDING as i8,
+            bottom: READER_CONTENT_BOTTOM_PADDING as i8,
         })
         .show(ui, |ui| {
             ui.horizontal(|ui| {
@@ -52,16 +119,11 @@ pub(crate) fn render_content_layout(
                     ui.set_max_width(text_width);
                     if show_title {
                         let title_color = effective_text_color(bg_color, font_color);
-                        let title_family = match font_family_name {
-                            "Monospace" => FontFamily::Monospace,
-                            "Serif" => FontFamily::Name("Serif".into()),
-                            "Sans" => FontFamily::Proportional,
-                            other => FontFamily::Name(other.into()),
-                        };
+                        let title_family = family_from_name(font_family_name);
                         ui.vertical_centered(|ui| {
                             ui.label(
                                 egui::RichText::new(title)
-                                    .size(font_size * 1.8)
+                                    .size(font_size * title_font_scale)
                                     .strong()
                                     .color(title_color)
                                     .family(title_family),
@@ -88,13 +150,14 @@ pub(crate) fn render_content_layout(
                             ui,
                             block,
                             font_size,
+                            title_font_scale,
                             bg_color,
                             text_width,
                             font_color,
                             font_family_name,
                             i18n,
                             clicked_link,
-                            abs_idx,
+                            BlockKey::new(current_chapter, abs_idx),
                             hl_ranges,
                         );
                     }
@@ -157,23 +220,25 @@ pub(crate) fn render_block(
     ui: &mut egui::Ui,
     block: &ContentBlock,
     font_size: f32,
+    title_font_scale: f32,
     bg_color: Color32,
     max_width: f32,
     font_color: Option<Color32>,
     font_family_name: &str,
     i18n: &reader_core::i18n::I18n,
     clicked_link: &mut Option<String>,
-    chapter_block_idx: usize,
+    block_key: BlockKey,
     highlight_ranges: &[(usize, usize, reader_core::library::HighlightColor)],
 ) {
     match block {
         ContentBlock::Heading { level, spans, .. } => {
             let scale = match level {
-                1 => 2.0,
-                2 => 1.6,
-                3 => 1.3,
-                _ => 1.2,
-            };
+                1 => title_font_scale * 1.3,
+                2 => title_font_scale * 1.1,
+                3 => title_font_scale * 0.9,
+                _ => title_font_scale * 0.8,
+            }
+            .max(1.0);
             let job = build_layout_job(
                 spans,
                 font_size * scale,
@@ -185,7 +250,7 @@ pub(crate) fn render_block(
                 &[],
             );
             ui.add_space(font_size * 0.8);
-            let is_tts_block = TTS_HIGHLIGHT_BLOCK.get() == Some(chapter_block_idx);
+            let is_tts_block = TTS_HIGHLIGHT_BLOCK.get() == Some(block_key);
             let galley = ui.painter().layout_job(job);
             let galley_size = galley.size();
             let (rect, response) =
@@ -196,6 +261,17 @@ pub(crate) fn render_block(
             }
             ui.painter()
                 .galley(rect.min, galley.clone(), Color32::PLACEHOLDER);
+
+            let text: String = spans.iter().map(|span| span.text.as_str()).collect();
+            BLOCK_GALLEYS.with(|galleys| {
+                galleys.borrow_mut().push(BlockGalleyEntry {
+                    key: block_key,
+                    galley: galley.clone(),
+                    rect,
+                    text,
+                    response: response.clone(),
+                });
+            });
 
             // Handle individual link clicks via pointer position matching
             if let Some(hover_pos) = ui.ctx().pointer_hover_pos() {
@@ -237,7 +313,7 @@ pub(crate) fn render_block(
                     spans.to_vec(),
                     Vec::<(usize, String, String, f32, u8)>::new(),
                 );
-                let corrections = match map.get(&chapter_block_idx) {
+                let corrections = match map.get(&block_key) {
                     Some(c) if !c.is_empty() => c,
                     _ => return empty_result,
                 };
@@ -345,7 +421,7 @@ pub(crate) fn render_block(
             let (rect, response) =
                 ui.allocate_exact_size(galley_size, egui::Sense::click_and_drag());
             // TTS read-along highlight (paint behind text)
-            if TTS_HIGHLIGHT_BLOCK.get() == Some(chapter_block_idx) {
+            if TTS_HIGHLIGHT_BLOCK.get() == Some(block_key) {
                 paint_tts_highlight(ui, rect);
             }
             ui.painter()
@@ -390,7 +466,7 @@ pub(crate) fn render_block(
                             let underline_y = y_bottom - 1.0;
                             ui.painter().line_segment(
                                 [egui::pos2(x, underline_y), egui::pos2(x2, underline_y)],
-                                egui::Stroke::new(2.0, Color32::from_rgb(220, 60, 50)),
+                                egui::Stroke::new(2.0_f32, Color32::from_rgb(220, 60, 50)),
                             );
 
                             // Hover tooltip: show corrected char + confidence
@@ -425,7 +501,7 @@ pub(crate) fn render_block(
                             );
                             CSC_RECTS.with(|r| {
                                 r.borrow_mut().push(CscRect {
-                                    block_idx: chapter_block_idx,
+                                    key: block_key,
                                     char_offset,
                                     original: _main_text.clone(), // original text
                                     corrected: top_text.clone(),  // corrected text
@@ -451,8 +527,13 @@ pub(crate) fn render_block(
 
             // Push into per-frame cache for the selection state machine
             BLOCK_GALLEYS.with(|bg| {
-                bg.borrow_mut()
-                    .push((chapter_block_idx, galley.clone(), rect, text.clone()));
+                bg.borrow_mut().push(BlockGalleyEntry {
+                    key: block_key,
+                    galley: galley.clone(),
+                    rect,
+                    text: text.clone(),
+                    response: response.clone(),
+                });
             });
 
             // Handle individual link clicks via pointer position matching
@@ -645,12 +726,12 @@ pub(crate) fn build_layout_job(
         let family = if is_bold {
             FontFamily::Name("Bold".into())
         } else {
-            match font_family_name {
-                "Monospace" => FontFamily::Monospace,
-                "Serif" => FontFamily::Name("Serif".into()),
-                "Sans" => FontFamily::Proportional,
-                other => FontFamily::Name(other.into()),
-            }
+            family_from_name(font_family_name)
+        };
+        let cjk_family = if !is_bold && font_family_name == "ReaderFont" {
+            FontFamily::Name("ReaderCjk".into())
+        } else {
+            family.clone()
         };
         let normal_color = if is_link { link_color } else { base_color };
         let leading = if i == 0 && !is_heading {
@@ -679,14 +760,14 @@ pub(crate) fn build_layout_job(
                 color: normal_color,
                 italics: is_italic,
                 underline: if is_link {
-                    egui::Stroke::new(1.0, link_color)
+                    egui::Stroke::new(1.0_f32, link_color)
                 } else {
                     egui::Stroke::NONE
                 },
                 line_height: Some(font_size * line_spacing()),
                 ..Default::default()
             };
-            job.append(&wrapped, leading, format);
+            append_font_runs(&mut job, &wrapped, leading, format, &cjk_family);
         } else {
             // Split span text at highlight boundaries
             let mut first_section = true;
@@ -715,7 +796,7 @@ pub(crate) fn build_layout_job(
                         color: fg,
                         italics: is_italic,
                         underline: if is_link {
-                            egui::Stroke::new(1.0, link_color)
+                            egui::Stroke::new(1.0_f32, link_color)
                         } else {
                             egui::Stroke::NONE
                         },
@@ -724,7 +805,7 @@ pub(crate) fn build_layout_job(
                         ..Default::default()
                     };
                     let lead = if first_section { leading } else { 0.0 };
-                    job.append(&seg_text, lead, format);
+                    append_font_runs(&mut job, &seg_text, lead, format, &cjk_family);
                     first_section = false;
                     seg_start = j;
                     cur_hl = this_hl;
@@ -742,7 +823,7 @@ pub(crate) fn build_layout_job(
                 color: fg,
                 italics: is_italic,
                 underline: if is_link {
-                    egui::Stroke::new(1.0, link_color)
+                    egui::Stroke::new(1.0_f32, link_color)
                 } else {
                     egui::Stroke::NONE
                 },
@@ -751,7 +832,7 @@ pub(crate) fn build_layout_job(
                 ..Default::default()
             };
             let lead = if first_section { leading } else { 0.0 };
-            job.append(&seg_text, lead, format);
+            append_font_runs(&mut job, &seg_text, lead, format, &cjk_family);
         }
 
         char_offset = span_end;
@@ -776,17 +857,19 @@ pub(crate) fn build_layout_job(
 pub(crate) fn estimate_block_height(
     block: &ContentBlock,
     font_size: f32,
+    title_font_scale: f32,
     line_height: f32,
     max_width: f32,
 ) -> f32 {
     match block {
         ContentBlock::Heading { level, spans, .. } => {
             let scale = match level {
-                1 => 2.0,
-                2 => 1.6,
-                3 => 1.3,
-                _ => 1.2,
-            };
+                1 => title_font_scale * 1.3,
+                2 => title_font_scale * 1.1,
+                3 => title_font_scale * 0.9,
+                _ => title_font_scale * 0.8,
+            }
+            .max(1.0);
             let sz = font_size * scale;
             let text_len: f32 = spans.iter().map(|s| estimate_text_width(&s.text, sz)).sum();
             (text_len / max_width).ceil().max(1.0) * sz * line_spacing() + font_size * 1.2
@@ -805,5 +888,68 @@ pub(crate) fn estimate_block_height(
         ContentBlock::Separator => 24.0,
         ContentBlock::BlankLine => font_size * 0.5,
         ContentBlock::Image { .. } => font_size * 3.0,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn routes_only_cjk_characters_and_punctuation_to_cjk_font() {
+        for ch in "中文日本語？！：；，。、“”‘’「」".chars() {
+            assert!(uses_cjk_font(ch), "{ch} should use ReaderCjk");
+        }
+        for ch in "English?!:;\"'😀".chars() {
+            assert!(!uses_cjk_font(ch), "{ch} should use ReaderFont");
+        }
+    }
+
+    #[test]
+    fn layout_job_groups_script_runs_into_reader_families() {
+        let mut job = LayoutJob::default();
+        append_font_runs(
+            &mut job,
+            "中文？ English?",
+            0.0,
+            TextFormat {
+                font_id: FontId::new(18.0, FontFamily::Name("ReaderFont".into())),
+                ..Default::default()
+            },
+            &FontFamily::Name("ReaderCjk".into()),
+        );
+
+        let families: Vec<String> = job
+            .sections
+            .iter()
+            .map(|section| match &section.format.font_id.family {
+                FontFamily::Name(name) => name.to_string(),
+                other => format!("{other:?}"),
+            })
+            .collect();
+        assert_eq!(families, ["ReaderCjk", "ReaderFont"]);
+    }
+
+    #[test]
+    fn highlighted_punctuation_keeps_cjk_font() {
+        let spans = [TextSpan {
+            text: "你好！”".to_owned(),
+            style: InlineStyle::Normal,
+            link_url: None,
+            correction: None,
+        }];
+        let job = build_layout_job(
+            &spans,
+            18.0,
+            Color32::WHITE,
+            false,
+            600.0,
+            None,
+            "ReaderFont",
+            &[(0, 3, reader_core::library::HighlightColor::Yellow)],
+        );
+        assert!(job.sections.iter().all(|section| {
+            section.format.font_id.family == FontFamily::Name("ReaderCjk".into())
+        }));
     }
 }

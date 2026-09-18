@@ -31,6 +31,15 @@ internal val NO_BREAK_AFTER = charArrayOf(
 internal const val PAGINATION_CACHE_MAX_SIZE = 10
 
 /**
+ * 页面中的渲染块。长段落可能被拆成多个片段，但仍保留其在原章节中的索引和字符偏移。
+ */
+internal data class PaginatedBlock(
+    val block: ContentBlock,
+    val sourceBlockIndex: Int,
+    val sourceCharOffset: Int = 0
+)
+
+/**
  * 手动将标题按行宽拆成多行（插入 \n），避免 Compose 自动 wrap 导致 lineHeight 不生效。
  */
 internal fun breakTitleIntoLines(title: String, contentWidthPx: Float, titleFontSizeSp: Float, spToPx: Float): String {
@@ -59,8 +68,9 @@ internal fun paginateContent(
     titleVPaddingDp: Dp = 32.dp,
     lineSpacing: Float = 1.5f,
     paraSpacing: Float = 0.5f,
-    textIndentChars: Int = 2
-): List<List<ContentBlock>> {
+    textIndentChars: Int = 2,
+    titleFontScale: Float = 1.5f
+): List<List<PaginatedBlock>> {
     val contentWidthPx = with(density) { contentWidth.toPx() }
     // sp → px 需要乘 fontScale（处理系统字体缩放）
     val spToPx = density.fontScale * density.density
@@ -71,25 +81,67 @@ internal fun paginateContent(
     val safetyMarginPx = lineHeight * 0.5f
     val maxHeightPx = with(density) { availableHeight.toPx() } - safetyMarginPx
     
-    val pages = mutableListOf<List<ContentBlock>>()
-    var currentPage = mutableListOf<ContentBlock>()
+    val pages = mutableListOf<List<PaginatedBlock>>()
+    var currentPage = mutableListOf<PaginatedBlock>()
     var currentHeight = 0f
     var isFirstPage = true
 
     // 第一页有章节标题占的高度
     if (isFirstPage && showChapterTitle) {
         // 标题实际渲染 lineHeight = (fontSize * 2.2f).sp
-        val titleLineHeightPx = fontSize * 2.2f * spToPx
+        val titleLineHeightPx = fontSize * titleFontScale * 1.45f * spToPx
         // 使用 breakTitleIntoLines 保持分行逻辑一致
-        val brokenTitle = breakTitleIntoLines(chapter.title, contentWidthPx, fontSize * 1.5f, spToPx)
+        val brokenTitle = breakTitleIntoLines(chapter.title, contentWidthPx, fontSize * titleFontScale, spToPx)
         val titleLines = brokenTitle.count { it == '\n' } + 1
         // 标题行高 + padding(top = vPadding*0.5 + bottom = vPadding) + 30% 缓冲
         val titlePaddingPx = with(density) { titleVPaddingDp.toPx() } * 1.5f
         currentHeight += (titleLines * titleLineHeightPx + titlePaddingPx) * 1.3f
     }
 
-    for (block in chapter.blocks) {
-        val blockHeight = estimateBlockHeight(block, fontSize, lineHeight, contentWidthPx, density, paraSpacing, textIndentChars)
+    for ((blockIndex, block) in chapter.blocks.withIndex()) {
+        val blockHeight = estimateBlockHeight(block, fontSize, lineHeight, contentWidthPx, density, paraSpacing, textIndentChars, titleFontScale)
+
+        if (block is ContentBlock.Paragraph && currentHeight + blockHeight > maxHeightPx) {
+            var remaining: ContentBlock.Paragraph = block
+            var sourceOffset = 0
+
+            while (remaining.spans.any { it.text.isNotEmpty() }) {
+                var remainingHeight = maxHeightPx - currentHeight
+                // 不在页尾硬塞不足两行的段落片段，避免产生孤行。
+                if (currentPage.isNotEmpty() && remainingHeight < lineHeight * 2f) {
+                    pages.add(currentPage.toList())
+                    currentPage = mutableListOf()
+                    currentHeight = 0f
+                    remainingHeight = maxHeightPx
+                }
+
+                val splitOffset = findParagraphSplitOffset(
+                    paragraph = remaining,
+                    maxHeightPx = remainingHeight,
+                    fontSize = fontSize,
+                    lineHeight = lineHeight,
+                    contentWidthPx = contentWidthPx,
+                    density = density,
+                    paraSpacing = paraSpacing,
+                    textIndentChars = textIndentChars
+                )
+                val textLength = remaining.spans.sumOf { it.text.length }
+                val safeOffset = splitOffset.coerceIn(1, textLength)
+                val (head, tail) = splitParagraph(remaining, safeOffset)
+
+                currentPage.add(PaginatedBlock(head, blockIndex, sourceOffset))
+                currentHeight += estimateBlockHeight(head, fontSize, lineHeight, contentWidthPx, density, paraSpacing, textIndentChars, titleFontScale)
+                sourceOffset += safeOffset
+                remaining = tail
+
+                if (remaining.spans.any { it.text.isNotEmpty() }) {
+                    pages.add(currentPage.toList())
+                    currentPage = mutableListOf()
+                    currentHeight = 0f
+                }
+            }
+            continue
+        }
 
         if (currentHeight + blockHeight > maxHeightPx && currentPage.isNotEmpty()) {
             pages.add(currentPage.toList())
@@ -98,7 +150,7 @@ internal fun paginateContent(
             isFirstPage = false
         }
 
-        currentPage.add(block)
+        currentPage.add(PaginatedBlock(block, blockIndex))
         currentHeight += blockHeight
     }
 
@@ -109,6 +161,67 @@ internal fun paginateContent(
     return pages.ifEmpty { listOf(emptyList()) }
 }
 
+/** 找出在给定高度内可容纳的最大字符边界。 */
+private fun findParagraphSplitOffset(
+    paragraph: ContentBlock.Paragraph,
+    maxHeightPx: Float,
+    fontSize: Float,
+    lineHeight: Float,
+    contentWidthPx: Float,
+    density: androidx.compose.ui.unit.Density,
+    paraSpacing: Float,
+    textIndentChars: Int
+): Int {
+    val length = paragraph.spans.sumOf { it.text.length }
+    if (length <= 1) return length
+
+    var low = 1
+    var high = length
+    var best = 1
+    while (low <= high) {
+        val mid = (low + high) ushr 1
+        val candidate = splitParagraph(paragraph, mid).first
+        val height = estimateBlockHeight(
+            candidate, fontSize, lineHeight, contentWidthPx, density,
+            paraSpacing, textIndentChars
+        )
+        if (height <= maxHeightPx) {
+            best = mid
+            low = mid + 1
+        } else {
+            high = mid - 1
+        }
+    }
+
+    return adjustSplitForCjk(paragraph.spans.joinToString("") { it.text }, best)
+        .coerceIn(1, length)
+}
+
+/** 在保留内联样式和链接的前提下拆分段落。 */
+private fun splitParagraph(
+    paragraph: ContentBlock.Paragraph,
+    offset: Int
+): Pair<ContentBlock.Paragraph, ContentBlock.Paragraph> {
+    val head = mutableListOf<TextSpan>()
+    val tail = mutableListOf<TextSpan>()
+    var consumed = 0
+    for (span in paragraph.spans) {
+        val local = (offset - consumed).coerceIn(0, span.text.length)
+        if (local > 0) head.add(span.copy(text = span.text.substring(0, local)))
+        if (local < span.text.length) tail.add(span.copy(text = span.text.substring(local)))
+        consumed += span.text.length
+    }
+    return ContentBlock.Paragraph(head, paragraph.anchor_id) to
+        ContentBlock.Paragraph(tail, paragraph.anchor_id)
+}
+
+private fun adjustSplitForCjk(text: String, proposed: Int): Int {
+    var offset = proposed.coerceIn(1, text.length)
+    while (offset > 1 && offset < text.length && NO_BREAK_BEFORE.contains(text[offset])) offset--
+    while (offset > 1 && NO_BREAK_AFTER.contains(text[offset - 1])) offset--
+    return offset
+}
+
 internal fun estimateBlockHeight(
     block: ContentBlock,
     fontSize: Float,
@@ -116,13 +229,18 @@ internal fun estimateBlockHeight(
     contentWidthPx: Float,
     density: androidx.compose.ui.unit.Density,
     paraSpacing: Float = 0.5f,
-    textIndentChars: Int = 2
+    textIndentChars: Int = 2,
+    titleFontScale: Float = 1.5f
 ): Float {
     return when (block) {
         is ContentBlock.Heading -> {
             val scale = when (block.level) {
-                1 -> 2.0f; 2 -> 1.6f; 3 -> 1.3f; else -> 1.2f
+                1 -> titleFontScale * 1.3f
+                2 -> titleFontScale * 1.1f
+                3 -> titleFontScale * 0.9f
+                else -> titleFontScale * 0.8f
             }
+                .coerceAtLeast(1.0f)
             val spToPx = density.fontScale * density.density
             var cjkCount = 0
             var asciiCount = 0

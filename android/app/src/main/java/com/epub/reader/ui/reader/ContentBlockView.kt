@@ -109,6 +109,7 @@ internal fun mapCscCorrectionsToBlocks(
 internal fun ContentBlockView(
     blockIndex: Int?,
     block: ContentBlock,
+    sourceCharOffset: Int = 0,
     fontSize: Float,
     textColor: Color,
     linkColor: Color,
@@ -119,6 +120,7 @@ internal fun ContentBlockView(
     lineSpacing: Float = 1.5f,
     paraSpacing: Float = 0.5f,
     textIndentChars: Int = 2,
+    titleFontScale: Float = 1.5f,
     textSelection: TextSelectionState? = null,
     onSelectionChange: (TextSelectionState?) -> Unit = {},
     blockLayoutRegistry: MutableMap<Int, BlockLayoutInfo>? = null,
@@ -133,11 +135,12 @@ internal fun ContentBlockView(
     when (block) {
         is ContentBlock.Heading -> {
             val scale = when (block.level) {
-                1 -> 2.0f
-                2 -> 1.6f
-                3 -> 1.3f
-                else -> 1.2f
+                1 -> titleFontScale * 1.3f
+                2 -> titleFontScale * 1.1f
+                3 -> titleFontScale * 0.9f
+                else -> titleFontScale * 0.8f
             }
+                .coerceAtLeast(1.0f)
             val annotated = buildSpanAnnotatedString(
                 spans = block.spans,
                 fontSize = fontSize * scale,
@@ -176,7 +179,7 @@ internal fun ContentBlockView(
                     .onGloballyPositioned { coordinates ->
                         val lr = layoutResult
                         if (idx != null && lr != null) {
-                            blockLayoutRegistry?.set(idx, BlockLayoutInfo(annotated.text, lr, coordinates))
+                            blockLayoutRegistry?.set(idx, BlockLayoutInfo(annotated.text, lr, coordinates, sourceCharOffset))
                         }
                     }
                     .drawWithContent {
@@ -216,8 +219,8 @@ internal fun ContentBlockView(
                         // 渲染实时选区
                         val selState = textSelection
                         if (selState != null && idx != null && idx in selState.startBlock..selState.endBlock) {
-                            val localStart = if (idx == selState.startBlock) selState.startChar else 0
-                            val localEnd = if (idx == selState.endBlock) selState.endChar else annotated.length
+                            val localStart = if (idx == selState.startBlock) selState.startChar - sourceCharOffset else 0
+                            val localEnd = if (idx == selState.endBlock) selState.endChar - sourceCharOffset else annotated.length
                             if (localStart < localEnd && localStart >= 0 && localEnd <= annotated.length) {
                                 val selPath = lr.multiParagraph.getPathForRange(localStart, localEnd)
                                 drawPath(selPath, color = Color(0x4266D3FF))
@@ -251,12 +254,12 @@ internal fun ContentBlockView(
                                     val annotations = annotated.getStringAnnotations(tag = "URL", start = startOffset, end = endOffset)
                                     if (annotations.isNotEmpty()) {
                                         onLinkClick(annotations.first().item)
+                                        down.consume()
+                                        up.consume()
                                     } else {
-                                        onTextTapped()
+                                        // 普通文本点击交给页面级手势处理，避免正文块把整页点击吃掉
                                     }
-                                } ?: onTextTapped()
-                                down.consume()
-                                up.consume()
+                                }
                             }
                         }
                     },
@@ -304,7 +307,7 @@ internal fun ContentBlockView(
                     .onGloballyPositioned { coordinates ->
                         val lr = layoutResult
                         if (idx != null && lr != null) {
-                            blockLayoutRegistry?.set(idx, BlockLayoutInfo(annotated.text, lr, coordinates))
+                            blockLayoutRegistry?.set(idx, BlockLayoutInfo(annotated.text, lr, coordinates, sourceCharOffset))
                         }
                     }
                     .drawWithContent {
@@ -314,8 +317,8 @@ internal fun ContentBlockView(
                         if (idx != null) {
                             for (hl in highlights) {
                                 if (idx in hl.startBlock..hl.endBlock) {
-                                    val hlStart = if (idx == hl.startBlock) hl.startOffset else 0
-                                    val hlEnd = if (idx == hl.endBlock) hl.endOffset else annotated.length
+                                    val hlStart = if (idx == hl.startBlock) hl.startOffset - sourceCharOffset else 0
+                                    val hlEnd = if (idx == hl.endBlock) hl.endOffset - sourceCharOffset else annotated.length
                                     if (hlStart < hlEnd && hlStart >= 0 && hlEnd <= annotated.length) {
                                         val hlPath = lr.multiParagraph.getPathForRange(hlStart, hlEnd)
                                         drawPath(hlPath, color = highlightColor(hl.color))
@@ -329,8 +332,8 @@ internal fun ContentBlockView(
                         }
                         for (csc in cscBlockCorrections) {
                             if (csc.status != CorrectionStatus.ACCEPTED && csc.status != CorrectionStatus.IGNORED) {
-                                val cscStart = csc.localOffset
-                                val cscEnd = (csc.localOffset + csc.original.length).coerceAtMost(annotated.length)
+                                val cscStart = csc.localOffset - sourceCharOffset
+                                val cscEnd = (cscStart + csc.original.length).coerceAtMost(annotated.length)
                                 if (cscStart in 0 until annotated.length && cscStart < cscEnd) {
                                     android.util.Log.d("CscRender", "draw block=$idx mode=$cscMode start=$cscStart end=$cscEnd orig=${csc.original} corr=${csc.corrected} status=${csc.status}")
                                     if (cscMode == "readonly") {
@@ -344,8 +347,8 @@ internal fun ContentBlockView(
                         // 渲染实时选区
                         val selState = textSelection
                         if (selState != null && idx != null && idx in selState.startBlock..selState.endBlock) {
-                            val localStart = if (idx == selState.startBlock) selState.startChar else 0
-                            val localEnd = if (idx == selState.endBlock) selState.endChar else annotated.length
+                            val localStart = if (idx == selState.startBlock) selState.startChar - sourceCharOffset else 0
+                            val localEnd = if (idx == selState.endBlock) selState.endChar - sourceCharOffset else annotated.length
                             if (localStart < localEnd && localStart >= 0 && localEnd <= annotated.length) {
                                 val selPath = lr.multiParagraph.getPathForRange(localStart, localEnd)
                                 drawPath(selPath, color = Color(0x4266D3FF))
@@ -365,7 +368,8 @@ internal fun ContentBlockView(
                                     if (cscMode == "readwrite") {
                                         val tappedCsc = cscBlockCorrections.firstOrNull { csc ->
                                             csc.status != CorrectionStatus.ACCEPTED && csc.status != CorrectionStatus.IGNORED &&
-                                            offset >= csc.localOffset && offset < csc.localOffset + csc.original.length
+                                            offset + sourceCharOffset >= csc.localOffset &&
+                                                offset + sourceCharOffset < csc.localOffset + csc.original.length
                                         }
                                         if (tappedCsc != null) {
                                             onCscCorrectionClick(tappedCsc, up.position)
@@ -379,12 +383,12 @@ internal fun ContentBlockView(
                                     val annotations = annotated.getStringAnnotations(tag = "URL", start = startOffset, end = endOffset)
                                     if (annotations.isNotEmpty()) {
                                         onLinkClick(annotations.first().item)
+                                        down.consume()
+                                        up.consume()
                                     } else {
-                                        onTextTapped()
+                                        // 普通文本点击交给页面级手势处理，避免正文块把整页点击吃掉
                                     }
-                                } ?: onTextTapped()
-                                down.consume()
-                                up.consume()
+                                }
                             }
                         }
                     },

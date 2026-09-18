@@ -20,12 +20,17 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.zhongbai233.epub.reader.model.*
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.distinctUntilChanged
 
 // ─── 滚动模式 ───
 
 @Composable
 internal fun ScrollModeContent(
     chapter: Chapter,
+    allChapters: List<Chapter> = listOf(chapter),
+    initialChapter: Int = 0,
+    onChapterVisible: (Int) -> Unit = {},
     fontSize: Float,
     textColor: Color,
     linkColor: Color,
@@ -37,6 +42,7 @@ internal fun ScrollModeContent(
     lineSpacing: Float = 1.5f,
     paraSpacing: Float = 0.5f,
     textIndent: Int = 2,
+    titleFontScale: Float = 1.5f,
     textSelection: TextSelectionState? = null,
     onSelectionChange: (TextSelectionState?) -> Unit = {},
     blockLayoutRegistry: MutableMap<Int, BlockLayoutInfo>? = null,
@@ -45,9 +51,12 @@ internal fun ScrollModeContent(
     cscMode: String = "none",
     ttsCurrentBlock: Int = -1,
     onCscCorrectionClick: (CscBlockCorrection, Offset) -> Unit = { _, _ -> }
+    ,initialBlock: Int = 0
+    ,onPositionChange: (Int) -> Unit = {}
 ) {
     val listState = rememberLazyListState()
-    val showChapterTitle = remember(chapter) { shouldRenderChapterTitle(chapter) }
+    var suppressChapterCallback by remember { mutableStateOf(false) }
+    var lastVisibleChapter by remember { mutableIntStateOf(initialChapter) }
     val configuration = LocalConfiguration.current
     val scrollDensity = LocalDensity.current
     val hPaddingDp = configuration.screenWidthDp.dp * 0.065f
@@ -60,6 +69,48 @@ internal fun ScrollModeContent(
     var pullTotal by remember { mutableFloatStateOf(0f) }
     var pullTriggered by remember { mutableStateOf(false) }
     val pullThreshold = with(scrollDensity) { 120.dp.toPx() }
+
+    LaunchedEffect(allChapters) {
+        suppressChapterCallback = true
+        listState.scrollToItem(initialChapter.coerceIn(0, allChapters.lastIndex.coerceAtLeast(0)))
+        // Let the programmatic positioning settle before user-driven chapter
+        // visibility changes are reported to the parent.
+        withFrameNanos { }
+        suppressChapterCallback = false
+    }
+
+    LaunchedEffect(initialChapter) {
+        if (initialChapter == lastVisibleChapter) return@LaunchedEffect
+        suppressChapterCallback = true
+        listState.scrollToItem(initialChapter.coerceIn(0, allChapters.lastIndex.coerceAtLeast(0)))
+        lastVisibleChapter = initialChapter
+        withFrameNanos { }
+        suppressChapterCallback = false
+    }
+
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.layoutInfo.visibleItemsInfo.firstOrNull()?.index }
+            .distinctUntilChanged()
+            .collect { chapterIndex ->
+                if (!suppressChapterCallback) {
+                    chapterIndex?.let {
+                        lastVisibleChapter = it
+                        onChapterVisible(it)
+                    }
+                }
+            }
+    }
+
+    LaunchedEffect(allChapters, initialChapter) {
+        snapshotFlow { listState.firstVisibleItemIndex }
+            .distinctUntilChanged()
+            .collect { chapterIndex ->
+                delay(350)
+                if (chapterIndex == initialChapter) {
+                    onPositionChange(initialBlock.coerceIn(0, chapter.blocks.lastIndex.coerceAtLeast(0)))
+                }
+            }
+    }
 
     val nestedScrollConnection = remember {
         object : androidx.compose.ui.input.nestedscroll.NestedScrollConnection {
@@ -109,53 +160,55 @@ internal fun ScrollModeContent(
             .nestedScroll(nestedScrollConnection),
         contentPadding = PaddingValues(start = hPaddingDp, end = hPaddingDp, top = topPaddingDp, bottom = bottomPaddingDp)
     ) {
-        if (showChapterTitle) {
-            // 章节标题
-            item {
-                Text(
-                    text = breakTitleIntoLines(chapter.title, scrollContentWidthPx, fontSize * 1.5f, scrollSpToPx),
-                    style = TextStyle(
-                        fontSize = (fontSize * 1.5f).sp,
-                        lineHeight = (fontSize * 2.2f).sp,
-                        fontWeight = FontWeight.Bold,
+        itemsIndexed(allChapters, key = { index, _ -> "chapter-$index" }) { chapterIndex, chapterItem ->
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = if (chapterIndex == 0) 0.dp else topPaddingDp)
+            ) {
+                if (shouldRenderChapterTitle(chapterItem)) {
+                    Text(
+                        text = breakTitleIntoLines(chapterItem.title, scrollContentWidthPx, fontSize * titleFontScale, scrollSpToPx),
+                        style = TextStyle(
+                            fontSize = (fontSize * titleFontScale).sp,
+                            lineHeight = (fontSize * titleFontScale * 1.45f).sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = fontFamily,
+                            color = textColor,
+                            textAlign = TextAlign.Center
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = topPaddingDp * 0.5f, bottom = topPaddingDp * 2.0f)
+                    )
+                }
+                chapterItem.blocks.forEachIndexed { blockIndex, block ->
+                    ContentBlockView(
+                        blockIndex = blockIndex,
+                        block = block,
+                        fontSize = fontSize,
+                        textColor = textColor,
+                        linkColor = linkColor,
+                        bgColor = bgColor,
                         fontFamily = fontFamily,
-                        color = textColor,
-                        textAlign = TextAlign.Center
-                    ),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = topPaddingDp * 0.5f, bottom = topPaddingDp * 2.0f)
-                )
+                        onLinkClick = onLinkClick,
+                        onTextTapped = onTextTapped,
+                        lineSpacing = lineSpacing,
+                        paraSpacing = paraSpacing,
+                        textIndentChars = textIndent,
+                        titleFontScale = titleFontScale,
+                        textSelection = textSelection,
+                        onSelectionChange = onSelectionChange,
+                        blockLayoutRegistry = if (chapterIndex == initialChapter) blockLayoutRegistry else null,
+                        highlights = if (chapterIndex == initialChapter) highlights else emptyList(),
+                        cscBlockCorrections = if (chapterIndex == initialChapter) cscBlockCorrections[blockIndex] ?: emptyList() else emptyList(),
+                        cscMode = cscMode,
+                        ttsCurrentBlock = if (chapterIndex == initialChapter) ttsCurrentBlock else -1,
+                        onCscCorrectionClick = onCscCorrectionClick
+                    )
+                }
+                Spacer(Modifier.height(64.dp))
             }
         }
-
-        // 内容块
-        itemsIndexed(chapter.blocks) { blockIndex, block ->
-            ContentBlockView(
-                blockIndex = blockIndex,
-                block = block,
-                fontSize = fontSize,
-                textColor = textColor,
-                linkColor = linkColor,
-                bgColor = bgColor,
-                fontFamily = fontFamily,
-                onLinkClick = onLinkClick,
-                onTextTapped = onTextTapped,
-                lineSpacing = lineSpacing,
-                paraSpacing = paraSpacing,
-                textIndentChars = textIndent,
-                textSelection = textSelection,
-                onSelectionChange = onSelectionChange,
-                blockLayoutRegistry = blockLayoutRegistry,
-                highlights = highlights,
-                cscBlockCorrections = cscBlockCorrections[blockIndex] ?: emptyList(),
-                cscMode = cscMode,
-                ttsCurrentBlock = ttsCurrentBlock,
-                onCscCorrectionClick = onCscCorrectionClick
-            )
-        }
-
-        // 底部留白
-        item { Spacer(Modifier.height(64.dp)) }
     }
 }

@@ -17,7 +17,18 @@ use reader_core::i18n::{I18n, Language};
 use reader_core::library::Library;
 use reader_core::sharing::{start_listener, DiscoveredPeer, PeerStore};
 
+use crate::ui::reader_state::ContinuousScrollState;
+
 type FontDiscoveryResult = Arc<Mutex<Option<(Vec<String>, HashMap<String, String>)>>>;
+pub(crate) type TtsAudioResultSlot = Arc<Mutex<Option<Result<Vec<u8>, String>>>>;
+
+fn extend_unique_font_chain(target: &mut Vec<String>, fonts: impl IntoIterator<Item = String>) {
+    for font in fonts {
+        if !target.contains(&font) {
+            target.push(font);
+        }
+    }
+}
 
 #[derive(Clone, Debug)]
 struct BossHotkeySpec {
@@ -647,6 +658,10 @@ fn default_reader_toolbar_visible() -> bool {
     false
 }
 
+fn default_title_font_scale() -> f32 {
+    1.5
+}
+
 fn generate_pin() -> String {
     use rand::RngCore;
     let val = rand::rngs::OsRng.next_u32() % 10000;
@@ -727,6 +742,8 @@ struct AppSettings {
     para_spacing: f32,
     #[serde(default = "default_text_indent")]
     text_indent: u8,
+    #[serde(default = "default_title_font_scale")]
+    title_font_scale: f32,
     #[serde(default)]
     auto_scroll_speed: f32,
     #[serde(default)]
@@ -812,6 +829,7 @@ impl AppSettings {
             line_spacing: app.line_spacing,
             para_spacing: app.para_spacing,
             text_indent: app.text_indent,
+            title_font_scale: app.title_font_scale,
             auto_scroll_speed: app.auto_scroll_speed,
             tts_voice_name: app.tts_voice_name.clone(),
             tts_rate: app.tts_rate,
@@ -848,6 +866,7 @@ impl AppSettings {
         app.line_spacing = self.line_spacing.clamp(0.8, 2.5);
         app.para_spacing = self.para_spacing.clamp(0.0, 2.0);
         app.text_indent = self.text_indent.min(4);
+        app.title_font_scale = self.title_font_scale.clamp(1.0, 2.5);
         app.auto_scroll_speed = self.auto_scroll_speed.clamp(0.0, 200.0);
         app.i18n.set_language(Language::from_code(&self.language));
         if !self.tts_voice_name.is_empty() {
@@ -945,7 +964,11 @@ pub struct ReaderApp {
     pub book_path: Option<String>,
     pub current_book_hash: Option<String>,
     pub last_synced_chapter: Option<usize>,
+    pub last_synced_block: Option<usize>,
     pub current_chapter: usize,
+    pub current_block: usize,
+    pub pending_restore_block: Option<usize>,
+    pub position_save_due: Option<std::time::Instant>,
     pub font_size: f32,
     pub dark_mode: bool,
     pub reader_bg_color: Color32,
@@ -969,6 +992,7 @@ pub struct ReaderApp {
     pub view: AppView,
     pub library: Library,
     pub scroll_mode: bool,
+    pub(crate) continuous_scroll: ContinuousScrollState,
     pub current_page: usize,
     pub total_pages: usize,
     pub page_block_ranges: Vec<(usize, usize)>,
@@ -1040,6 +1064,7 @@ pub struct ReaderApp {
     pub line_spacing: f32,
     pub para_spacing: f32,
     pub text_indent: u8,
+    pub title_font_scale: f32,
     // ── Search ──
     pub show_search: bool,
     pub search_query: String,
@@ -1080,16 +1105,26 @@ pub struct ReaderApp {
     pub tts_voice_name: String,
     pub tts_rate: i32,   // e.g. 0, -20, +50 (percent)
     pub tts_volume: i32, // e.g. 0, -50, +50 (percent)
+    pub tts_current_chapter: usize,
     pub tts_current_block: usize,
+    pub tts_current_char: usize,
     pub tts_stop_flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    pub tts_generation: std::sync::Arc<std::sync::atomic::AtomicU64>,
     pub tts_audio_sink: Option<std::sync::Arc<rodio::Sink>>,
+    pub tts_output_stream: Option<rodio::OutputStream>,
+    pub tts_output_handle: Option<rodio::OutputStreamHandle>,
     pub tts_status: std::sync::Arc<std::sync::Mutex<String>>,
     pub show_tts_panel: bool,
-    pub tts_pending_audio: Option<std::sync::Arc<std::sync::Mutex<Option<Vec<u8>>>>>,
+    pub tts_pending_audio: Option<TtsAudioResultSlot>,
     /// Prefetched audio for the next block (ready to play immediately when current finishes).
-    pub tts_prefetch_audio: Option<std::sync::Arc<std::sync::Mutex<Option<Vec<u8>>>>>,
-    /// Block index that the prefetch corresponds to.
+    pub tts_prefetch_audio: Option<TtsAudioResultSlot>,
+    /// Chapter and block that the prefetch corresponds to.
+    pub tts_prefetch_chapter: usize,
     pub tts_prefetch_block: usize,
+    /// Keep the reader viewport aligned with the current TTS block.
+    pub tts_follow_view: bool,
+    /// Prevent TTS-driven page/chapter navigation from detaching the viewport.
+    pub tts_syncing_navigation: bool,
     pub last_egui_ctx: Option<egui::Context>,
     // ── API Settings ──
     pub translate_api_url: String,
@@ -1171,6 +1206,7 @@ pub enum UpdateState {
 
 #[derive(Clone)]
 pub struct CrossChapterSnapshot {
+    pub chapter: usize,
     pub blocks: Arc<Vec<reader_core::epub::ContentBlock>>,
     pub block_ranges: Vec<(usize, usize)>,
     pub total_pages: usize,
@@ -1245,7 +1281,11 @@ impl Default for ReaderApp {
             book_path: None,
             current_book_hash: None,
             last_synced_chapter: None,
+            last_synced_block: None,
             current_chapter: 0,
+            current_block: 0,
+            pending_restore_block: None,
+            position_save_due: None,
             font_size: 16.0,
             dark_mode: true,
             reader_bg_color: Color32::from_rgb(250, 246, 238),
@@ -1259,7 +1299,7 @@ impl Default for ReaderApp {
             reader_bg_image_alpha: 0.22,
             reader_bg_texture: None,
             show_settings: false,
-            show_toc: true,
+            show_toc: false,
             reader_toolbar_visible: default_reader_toolbar_visible(),
             reader_window_level: egui::WindowLevel::Normal,
             window_position: None,
@@ -1269,6 +1309,7 @@ impl Default for ReaderApp {
             view: AppView::Library,
             library,
             scroll_mode: false,
+            continuous_scroll: ContinuousScrollState::default(),
             current_page: 0,
             total_pages: 0,
             page_block_ranges: Vec::new(),
@@ -1332,6 +1373,7 @@ impl Default for ReaderApp {
             line_spacing: default_line_spacing(),
             para_spacing: default_para_spacing(),
             text_indent: default_text_indent(),
+            title_font_scale: default_title_font_scale(),
             // Search
             show_search: false,
             search_query: String::new(),
@@ -1364,14 +1406,22 @@ impl Default for ReaderApp {
             tts_voice_name: "zh-CN-XiaoxiaoNeural".to_string(),
             tts_rate: 0,
             tts_volume: 0,
+            tts_current_chapter: 0,
             tts_current_block: 0,
+            tts_current_char: 0,
             tts_stop_flag: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            tts_generation: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
             tts_audio_sink: None,
+            tts_output_stream: None,
+            tts_output_handle: None,
             tts_status: std::sync::Arc::new(std::sync::Mutex::new(String::new())),
             show_tts_panel: false,
             tts_pending_audio: None,
             tts_prefetch_audio: None,
+            tts_prefetch_chapter: 0,
             tts_prefetch_block: 0,
+            tts_follow_view: false,
+            tts_syncing_navigation: false,
             last_egui_ctx: None,
             // API settings
             translate_api_url: String::new(),
@@ -1497,6 +1547,7 @@ impl Default for ReaderApp {
 
 impl ReaderApp {
     pub fn trigger_page_animation_to(&mut self, target_page: usize, direction: f32) {
+        let page_changed = target_page != self.current_page;
         if self.reader_page_animation == "None"
             || self.scroll_mode
             || target_page == self.current_page
@@ -1505,6 +1556,9 @@ impl ReaderApp {
             self.page_anim_progress = 1.0;
             self.page_anim_from = target_page;
             self.page_anim_to = target_page;
+            if page_changed {
+                self.tts_detach_view();
+            }
             return;
         }
 
@@ -1518,6 +1572,7 @@ impl ReaderApp {
         self.page_anim_progress = 0.0;
         self.page_anim_cross_chapter = false;
         self.current_page = target_page;
+        self.tts_detach_view();
     }
 
     pub fn pick_reader_background_image(&mut self) {
@@ -1628,7 +1683,10 @@ impl ReaderApp {
                 self.book_path = Some(entry.path.clone());
                 self.current_chapter = ch;
                 self.last_synced_chapter = None; // Reset so progress is pushed immediately on first update
-                self.scroll_to_top = true;
+                self.last_synced_block = None;
+                self.current_block = entry.last_block;
+                self.pending_restore_block = Some(entry.last_block);
+                self.scroll_to_top = entry.last_block == 0;
                 self.pages_dirty = true;
                 self.current_page = 0;
                 self.view = AppView::Reader;
@@ -1680,6 +1738,8 @@ impl ReaderApp {
             self.scroll_to_top = true;
             self.pages_dirty = true;
             self.current_page = 0;
+            self.current_block = 0;
+            self.pending_restore_block = None;
             if let Some(p) = &self.book_path {
                 let chap_title = self
                     .book
@@ -1699,6 +1759,7 @@ impl ReaderApp {
             }
             // Check if user should be prompted to contribute
             self.csc_check_contribution_prompt();
+            self.tts_detach_view();
         }
     }
 
@@ -1708,6 +1769,8 @@ impl ReaderApp {
             self.scroll_to_top = true;
             self.pages_dirty = true;
             self.current_page = 0;
+            self.current_block = 0;
+            self.pending_restore_block = None;
             if let Some(p) = &self.book_path {
                 let chap_title = self
                     .book
@@ -1728,6 +1791,7 @@ impl ReaderApp {
             }
             // Check if user should be prompted to contribute
             self.csc_check_contribution_prompt();
+            self.tts_detach_view();
         }
     }
 
@@ -1906,6 +1970,7 @@ impl ReaderApp {
         if let Some(book) = &self.book {
             if let Some(ch) = book.chapters.get(self.current_chapter) {
                 self.page_anim_cross_chapter_snapshot = Some(CrossChapterSnapshot {
+                    chapter: self.current_chapter,
                     blocks: Arc::new(ch.blocks.clone()),
                     block_ranges: self.page_block_ranges.clone(),
                     total_pages: self.total_pages,
@@ -1935,6 +2000,40 @@ impl ReaderApp {
             self.capture_cross_chapter_snapshot();
             self.next_chapter();
             self.start_cross_chapter_animation(1.0);
+        }
+    }
+
+    pub fn schedule_position_save(&mut self, chapter: usize, block: usize) {
+        if self.current_chapter != chapter || self.current_block != block {
+            self.current_chapter = chapter;
+            self.current_block = block;
+            self.position_save_due =
+                Some(std::time::Instant::now() + std::time::Duration::from_millis(400));
+        }
+    }
+
+    fn flush_reading_position_if_due(&mut self) {
+        let Some(due) = self.position_save_due else {
+            return;
+        };
+        if std::time::Instant::now() < due {
+            return;
+        }
+        self.position_save_due = None;
+        if let Some(path) = &self.book_path {
+            let chapter_title = self
+                .book
+                .as_ref()
+                .and_then(|b| b.chapters.get(self.current_chapter))
+                .map(|c| c.title.clone());
+            self.library.update_position(
+                &self.data_dir,
+                path,
+                self.current_chapter,
+                chapter_title,
+                self.current_block,
+                0,
+            );
         }
     }
 
@@ -2442,6 +2541,7 @@ impl eframe::App for ReaderApp {
         }
         // --- Poll TTS audio ---
         self.tts_poll_audio();
+        self.flush_reading_position_if_due();
         // --- Poll CSC model download ---
         self.csc_poll_download();
         // --- Poll GitHub OAuth ---
@@ -2536,10 +2636,17 @@ impl eframe::App for ReaderApp {
                 // If the update applies to the currently opened book
                 if let Some(hash) = &self.current_book_hash {
                     if &update.book_hash == hash {
-                        if update.chapter != self.current_chapter {
-                            self.previous_chapter = Some(self.current_chapter);
+                        if update.chapter != self.current_chapter
+                            || update.block != self.current_block
+                        {
+                            if update.chapter != self.current_chapter {
+                                self.previous_chapter = Some(self.current_chapter);
+                            }
                             self.current_chapter = update.chapter;
                             self.last_synced_chapter = Some(update.chapter); // Don't bounce it back
+                            self.last_synced_block = Some(update.block);
+                            self.current_block = update.block;
+                            self.pending_restore_block = Some(update.block);
                             self.pages_dirty = true;
                             self.current_page = 0;
                         }
@@ -2551,11 +2658,13 @@ impl eframe::App for ReaderApp {
                                     .and_then(|b| b.chapters.get(self.current_chapter))
                                     .map(|c| c.title.clone())
                             });
-                            self.library.update_chapter(
+                            self.library.update_position(
                                 &self.data_dir,
                                 p,
                                 self.current_chapter,
                                 chap_title,
+                                update.block,
+                                update.char_offset,
                             );
                         }
                         continue;
@@ -2567,6 +2676,8 @@ impl eframe::App for ReaderApp {
                     if let Ok(h) = reader_core::epub::EpubBook::file_hash(&entry.path) {
                         if h == update.book_hash
                             && (entry.last_chapter != update.chapter
+                                || entry.last_block != update.block
+                                || entry.last_char_offset != update.char_offset
                                 || (update.chapter_title.is_some()
                                     && entry.last_chapter_title != update.chapter_title))
                         {
@@ -2575,11 +2686,13 @@ impl eframe::App for ReaderApp {
                     }
                 }
                 for p in matched_paths {
-                    self.library.update_chapter(
+                    self.library.update_position(
                         &self.data_dir,
                         &p,
                         update.chapter,
                         update.chapter_title.clone(),
+                        update.block,
+                        update.char_offset,
                     );
                 }
             }
@@ -2622,7 +2735,9 @@ impl eframe::App for ReaderApp {
         }
 
         // --- Push outgoing local progress to PeerStore ---
-        if Some(self.current_chapter) != self.last_synced_chapter {
+        if Some(self.current_chapter) != self.last_synced_chapter
+            || Some(self.current_block) != self.last_synced_block
+        {
             if let Some(hash) = &self.current_book_hash {
                 let mut store = self.peer_store.lock().unwrap_or_else(|e| e.into_inner());
                 let now = std::time::SystemTime::now()
@@ -2642,6 +2757,8 @@ impl eframe::App for ReaderApp {
 
                 if let Some(local) = store.progress.iter_mut().find(|p| p.book_hash == *hash) {
                     local.chapter = self.current_chapter;
+                    local.block = self.current_block;
+                    local.char_offset = 0;
                     local.chapter_title = chapter_title.clone();
                     local.title = title.clone();
                     local.timestamp = now;
@@ -2650,12 +2767,15 @@ impl eframe::App for ReaderApp {
                         book_hash: hash.clone(),
                         title,
                         chapter: self.current_chapter,
+                        block: self.current_block,
+                        char_offset: 0,
                         chapter_title,
                         timestamp: now,
                     });
                 }
                 store.save(&self.data_dir);
                 self.last_synced_chapter = Some(self.current_chapter);
+                self.last_synced_block = Some(self.current_block);
             }
         }
 
@@ -2676,6 +2796,11 @@ impl eframe::App for ReaderApp {
             let default_proportional = fonts
                 .families
                 .get(&egui::FontFamily::Proportional)
+                .cloned()
+                .unwrap_or_default();
+            let default_monospace = fonts
+                .families
+                .get(&egui::FontFamily::Monospace)
                 .cloned()
                 .unwrap_or_default();
 
@@ -2858,57 +2983,68 @@ impl eframe::App for ReaderApp {
                 }
             }
 
-            // Build "ReaderFont" composite family: Latin fonts → CJK fonts → emoji
-            let mut reader_font_chain: Vec<String> = Vec::new();
-
-            // Latin part
+            // Build separate Latin-first and CJK-first reader families. egui picks the first
+            // font containing each glyph, so one shared chain lets Latin fonts consume CJK
+            // punctuation before the user's selected CJK font gets a chance to render it.
+            let mut reader_latin_fonts = Vec::new();
             match self.reader_font_family.as_str() {
-                "Sans" => reader_font_chain.extend(default_proportional.clone()),
+                "Sans" => {
+                    extend_unique_font_chain(&mut reader_latin_fonts, default_proportional.clone())
+                }
                 "Serif" => {
                     if fonts.font_data.contains_key("serif_font") {
-                        reader_font_chain.push("serif_font".to_owned());
+                        reader_latin_fonts.push("serif_font".to_owned());
                     }
-                    reader_font_chain.extend(default_proportional.clone());
+                    extend_unique_font_chain(&mut reader_latin_fonts, default_proportional.clone());
                 }
                 "Monospace" => {
-                    if let Some(mono) = fonts.families.get(&egui::FontFamily::Monospace) {
-                        reader_font_chain.extend(mono.clone());
-                    }
+                    extend_unique_font_chain(&mut reader_latin_fonts, default_monospace.clone());
                 }
                 other => {
                     if fonts.font_data.contains_key(other) {
-                        reader_font_chain.push(other.to_owned());
+                        reader_latin_fonts.push(other.to_owned());
                     }
-                    reader_font_chain.extend(default_proportional.clone());
+                    extend_unique_font_chain(&mut reader_latin_fonts, default_proportional.clone());
                 }
             }
 
-            // CJK part
+            let mut reader_cjk_fonts = Vec::new();
             match self.reader_cjk_font_family.as_str() {
                 "Sans" => {
                     if fonts.font_data.contains_key("cjk_font") {
-                        reader_font_chain.push("cjk_font".to_owned());
+                        reader_cjk_fonts.push("cjk_font".to_owned());
                     }
                 }
                 other => {
                     if fonts.font_data.contains_key(other) {
-                        reader_font_chain.push(other.to_owned());
+                        reader_cjk_fonts.push(other.to_owned());
                     }
                     if fonts.font_data.contains_key("cjk_font") {
-                        reader_font_chain.push("cjk_font".to_owned());
+                        reader_cjk_fonts.push("cjk_font".to_owned());
                     }
                 }
             }
 
-            // Emoji
+            let mut emoji_fallback = Vec::new();
             if fonts.font_data.contains_key("emoji_font") {
-                reader_font_chain.push("emoji_font".to_owned());
+                emoji_fallback.push("emoji_font".to_owned());
             }
+
+            let mut reader_font_chain = reader_latin_fonts.clone();
+            extend_unique_font_chain(&mut reader_font_chain, reader_cjk_fonts.clone());
+            extend_unique_font_chain(&mut reader_font_chain, emoji_fallback.clone());
+
+            let mut reader_cjk_chain = reader_cjk_fonts.clone();
+            extend_unique_font_chain(&mut reader_cjk_chain, reader_latin_fonts.clone());
+            extend_unique_font_chain(&mut reader_cjk_chain, emoji_fallback.clone());
 
             fonts.families.insert(
                 egui::FontFamily::Name("ReaderFont".into()),
                 reader_font_chain,
             );
+            fonts
+                .families
+                .insert(egui::FontFamily::Name("ReaderCjk".into()), reader_cjk_chain);
 
             ctx.set_fonts(fonts);
             self.pages_dirty = true;

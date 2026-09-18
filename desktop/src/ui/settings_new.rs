@@ -197,6 +197,21 @@ impl ReaderApp {
             }
         });
 
+        // Title font scale
+        ui.horizontal(|ui| {
+            ui.label(self.i18n.t("settings.title_font_scale"));
+            if ui
+                .add_sized(
+                    [ui.available_width().min(150.0), 18.0],
+                    egui::Slider::new(&mut self.title_font_scale, 1.0..=2.5).fixed_decimals(1),
+                )
+                .changed()
+            {
+                self.title_font_scale = self.title_font_scale.clamp(1.0, 2.5);
+                self.pages_dirty = true;
+            }
+        });
+
         // Latin font family
         ui.horizontal_wrapped(|ui| {
             ui.label(self.i18n.t("settings.font_latin"));
@@ -458,7 +473,7 @@ impl ReaderApp {
                     .fill(p)
                     .min_size(Vec2::new(22.0, 22.0));
                 if self.reader_bg_color == p {
-                    btn = btn.stroke(egui::Stroke::new(2.0, Color32::LIGHT_BLUE));
+                    btn = btn.stroke(egui::Stroke::new(2.0_f32, Color32::LIGHT_BLUE));
                 }
                 if ui.add(btn).clicked() {
                     self.reader_bg_color = p;
