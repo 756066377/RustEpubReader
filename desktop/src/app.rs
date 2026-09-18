@@ -3067,11 +3067,13 @@ impl eframe::App for ReaderApp {
             && !ctx.wants_keyboard_input()
         {
             ctx.input(|i| {
-                if i.key_pressed(egui::Key::A) {
-                    self.prev_chapter();
-                }
-                if i.key_pressed(egui::Key::D) {
-                    self.next_chapter();
+                if !self.scroll_mode {
+                    if i.key_pressed(egui::Key::A) {
+                        self.prev_chapter();
+                    }
+                    if i.key_pressed(egui::Key::D) {
+                        self.next_chapter();
+                    }
                 }
                 if i.key_pressed(egui::Key::ArrowLeft) {
                     if self.scroll_mode {
