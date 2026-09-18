@@ -658,6 +658,10 @@ fn default_reader_toolbar_visible() -> bool {
     false
 }
 
+fn default_scroll_mode() -> bool {
+    true
+}
+
 fn default_title_font_scale() -> f32 {
     1.5
 }
@@ -724,6 +728,7 @@ struct AppSettings {
     reader_page_animation_speed: f32,
     reader_bg_image_path: Option<String>,
     reader_bg_image_alpha: f32,
+    #[serde(default = "default_scroll_mode")]
     scroll_mode: bool,
     show_toc: bool,
     #[serde(default = "default_reader_toolbar_visible")]
@@ -1308,7 +1313,7 @@ impl Default for ReaderApp {
             error_msg: None,
             view: AppView::Library,
             library,
-            scroll_mode: false,
+            scroll_mode: default_scroll_mode(),
             continuous_scroll: ContinuousScrollState::default(),
             current_page: 0,
             total_pages: 0,

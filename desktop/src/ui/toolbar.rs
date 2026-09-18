@@ -327,21 +327,6 @@ impl ReaderApp {
                         self.font_size = (self.font_size - 2.0).max(12.0);
                         self.pages_dirty = true;
                     }
-
-                    ui.separator();
-                    let hint_color = if self.dark_mode {
-                        egui::Color32::from_gray(140)
-                    } else {
-                        egui::Color32::from_gray(100)
-                    };
-                    ui.label(
-                        egui::RichText::new(format!(
-                            " {} / {} ",
-                            self.current_chapter + 1,
-                            self.total_chapters()
-                        ))
-                        .color(hint_color),
-                    );
                 });
             }
         });
