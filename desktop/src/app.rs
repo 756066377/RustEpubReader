@@ -2254,10 +2254,19 @@ impl ReaderApp {
 
     pub(crate) fn set_reader_chrome_visible(&mut self, visible: bool) {
         self.reader_toolbar_visible = visible;
-        self.show_toc = visible;
-        if self.show_toc {
-            self.scroll_toc_to_current = true;
+        if visible {
+            return;
         }
+        self.show_toc = false;
+        self.show_settings = false;
+        self.show_search = false;
+        self.show_annotations = false;
+        self.show_stats = false;
+        self.show_tts_panel = false;
+        self.show_sharing_panel = false;
+        self.show_review_panel = false;
+        self.show_export_dialog = false;
+        self.show_csc_contribute_dialog = false;
     }
 
     fn handle_reader_shortcuts(&mut self, ctx: &egui::Context) {

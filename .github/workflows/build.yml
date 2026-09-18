@@ -82,25 +82,20 @@ jobs:
           tag_name: ${{ github.ref_name }}
           name: RustEpubReader ${{ github.ref_name }}
           body: |
-            ## v1.0.9
+            ## v1.0.10
 
-            Windows 64 位隐蔽阅读发行版。相对 v1.0.4，已同步上游到 v1.0.8。
+            Windows 64 位隐蔽阅读发行版。
 
-            ### 新增
-            - 滚动模式支持连续跨章节阅读。
-            - TTS 连续朗读与全书朗读完毕状态。
-            - 块级阅读进度保存，并支持跨设备同步。
-            - 标题字号倍率调节。
-            - 命令行直接打开 `.epub` / `.txt`。
+            ### 修复
+            - `F2` 只显示选项栏，不再连带打开目录。
+            - 目录、设置等改由选项栏按钮手动开启。
+            - 再次按 `F2` 会收起选项栏，并同时关闭目录、设置、搜索、批注、统计、朗读、分享等窗口。
 
-            ### 改进
-            - 同步上游 `zhongbai2333/RustEpubReader:main` 到 v1.0.8。
-            - 标点符号跟随所选字体对齐。
-            - 应用内检查更新改为使用本仓库 GitHub Release。
-            - 保留本分支的 Windows 隐蔽阅读能力（无标题栏、Boss Key、F2 收起界面等）。
+            ### 说明
+            - 基于 v1.0.9（已同步上游 v1.0.8）。
             - CI 发行版构建仍只生成 Windows 桌面端产物。
 
             ### 下载
-            - `RustEpubReader-Win64-v1.0.9.exe`
+            - `RustEpubReader-Win64-v1.0.10.exe`
           files: |
             release-artifacts/RustEpubReader-Win64-*.exe
