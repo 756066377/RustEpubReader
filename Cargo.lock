@@ -720,6 +720,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "bincode"
+version = "1.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "34755f25b97607b0c88c6b64b51cf7e81b4e358688f2c6278c2e6c1865d4dfed"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "bit-set"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4468,6 +4477,7 @@ version = "0.1.0"
 dependencies = [
  "aes-gcm",
  "base64",
+ "bincode",
  "chardetng",
  "encoding_rs",
  "epub-builder",
@@ -4682,7 +4692,7 @@ dependencies = [
 
 [[package]]
 name = "rust_epub_reader"
-version = "1.0.13"
+version = "1.0.14"
 dependencies = [
  "anyhow",
  "base64",

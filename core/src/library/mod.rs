@@ -124,13 +124,11 @@ impl Library {
         }
         let now = now_secs();
 
-        let incoming_hash = file_hash(&source_path);
         let existing_idx = self.find_by_path(&source_path).or_else(|| {
-            incoming_hash.as_ref().and_then(|h| {
-                self.books
-                    .iter()
-                    .position(|b| file_hash(&b.path).as_ref() == Some(h))
-            })
+            let incoming_hash = file_hash(&source_path)?;
+            self.books
+                .iter()
+                .position(|b| file_hash(&b.path).as_ref() == Some(&incoming_hash))
         });
 
         let mut id = existing_idx
@@ -153,11 +151,21 @@ impl Library {
         let managed_epub_str = managed_epub.to_string_lossy().to_string();
 
         if source.exists() && source != managed_epub {
-            if let Err(e) = std::fs::copy(&source, &managed_epub) {
-                eprintln!(
-                    "[Library] failed to copy {:?} -> {:?}: {}",
-                    source, managed_epub, e
-                );
+            let same_size = std::fs::metadata(&source)
+                .ok()
+                .and_then(|src| {
+                    std::fs::metadata(&managed_epub)
+                        .ok()
+                        .map(|dst| src.len() == dst.len())
+                })
+                .unwrap_or(false);
+            if !same_size {
+                if let Err(e) = std::fs::copy(&source, &managed_epub) {
+                    eprintln!(
+                        "[Library] failed to copy {:?} -> {:?}: {}",
+                        source, managed_epub, e
+                    );
+                }
             }
         }
 

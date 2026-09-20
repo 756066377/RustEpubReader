@@ -82,19 +82,19 @@ jobs:
           tag_name: ${{ github.ref_name }}
           name: RustEpubReader ${{ github.ref_name }}
           body: |
-            ## v1.0.13
+            ## v1.0.14
 
             Windows 64 位隐蔽阅读发行版。
 
             ### 修复
-            - 打开较大 EPUB 时改为后台解析，避免窗口未响应卡死。
-            - 打开过程中显示提示，解析完成后进入阅读。
+            - 大书首次解析后写入本地缓存，下次启动不再整本重新解析。
+            - 再次打开书库中已有书籍时，跳过整文件哈希和重复拷贝。
 
             ### 说明
-            - 基于 v1.0.12。
+            - 基于 v1.0.13。
             - CI 发行版构建仍只生成 Windows 桌面端产物。
 
             ### 下载
-            - `RustEpubReader-Win64-v1.0.13.exe`
+            - `RustEpubReader-Win64-v1.0.14.exe`
           files: |
             release-artifacts/RustEpubReader-Win64-*.exe

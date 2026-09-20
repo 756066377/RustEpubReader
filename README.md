@@ -1,6 +1,6 @@
 # RustEpubReader
 
-**v1.0.13** · Windows 64 位隐蔽 EPUB 阅读器
+**v1.0.14** · Windows 64 位隐蔽 EPUB 阅读器
 
 本仓库只保留 **Windows x86_64** 桌面端，并针对“隐蔽阅读 / 办公摸鱼”做了调整。上游能力已同步到 `zhongbai2333/RustEpubReader` v1.0.8。
 
@@ -8,16 +8,16 @@
 
 从 [GitHub Releases](https://github.com/756066377/RustEpubReader/releases/latest) 下载：
 
-- `RustEpubReader-Win64-v1.0.13.exe`
+- `RustEpubReader-Win64-v1.0.14.exe`
 
 也可以在 [Actions](https://github.com/756066377/RustEpubReader/actions) 里取最新 `windows-desktop-build` 产物（开发构建，文件名带分支名）。
 
-## v1.0.13 更新
+## v1.0.14 更新
 
-- 打开大书改为后台解析，界面不再未响应卡死
-- 打开过程中显示进度提示，解析完成后进入阅读
+- 大书首次解析后写入本地缓存，下次启动不再整本重新解析
+- 再次打开已在书库中的书时，跳过整文件哈希和重复拷贝
 
-v1.0.12 已移除翻页模式，阅读只保留瀑布流滚动。
+v1.0.13 已把打开书籍改到后台解析，避免窗口未响应。
 
 ## 隐蔽阅读特性
 

@@ -1228,6 +1228,7 @@ pub struct OpenedBook {
     pub path: String,
     pub chapter: Option<usize>,
     pub hash: Option<String>,
+    pub from_cache: bool,
 }
 
 pub struct BookOpenJob {
@@ -1663,12 +1664,16 @@ impl ReaderApp {
             slot,
         });
         std::thread::spawn(move || {
-            let result = EpubBook::open(&worker_path).map(|book| OpenedBook {
-                hash: EpubBook::file_hash(&worker_path).ok(),
-                book,
-                path: worker_path,
-                chapter,
-            });
+            let result =
+                EpubBook::open_or_cached(Path::new(&worker_path)).map(|(book, from_cache)| {
+                    OpenedBook {
+                        book,
+                        path: worker_path,
+                        chapter,
+                        hash: None,
+                        from_cache,
+                    }
+                });
             if let Ok(mut guard) = slot_clone.lock() {
                 *guard = Some(result);
             }
@@ -1703,12 +1708,14 @@ impl ReaderApp {
             path,
             chapter,
             hash,
+            from_cache,
         } = opened;
         self.push_feedback_log(format!(
-            "[Book] opened: title={}, chapters={}, fonts={}",
+            "[Book] opened: title={}, chapters={}, fonts={}, cache={}",
             book.title,
             book.chapters.len(),
-            book.fonts.len()
+            book.fonts.len(),
+            from_cache
         ));
         let mut ch = chapter.unwrap_or(0);
         if !book.chapters.is_empty() {
@@ -1727,6 +1734,16 @@ impl ReaderApp {
         let font_names: Vec<String> = book.fonts.iter().map(|(name, _)| name.clone()).collect();
         self.embedded_font_names = font_names;
         self.embedded_fonts_registered = false;
+        if !from_cache {
+            let cache_epub = entry.path.clone();
+            let book_for_cache = book.clone();
+            std::thread::spawn(move || {
+                if let Err(e) = EpubBook::save_parse_cache(Path::new(&cache_epub), &book_for_cache)
+                {
+                    eprintln!("[Book] failed to save parse cache: {e}");
+                }
+            });
+        }
         self.book = Some(book);
         self.current_book_hash = hash;
         self.book_path = Some(entry.path.clone());
