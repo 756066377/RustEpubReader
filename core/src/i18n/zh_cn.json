@@ -19,7 +19,8 @@
   "library.empty_hint": "点击右上角按钮打开一本 EPUB 书籍",
   "library.tip": "提示：点击卡片或'继续阅读'可恢复上次进度",
   "library.opening_book": "正在打开书籍",
-  "library.opening_hint": "首次打开大书需要解析章节；再次启动会使用缓存，速度会快很多。",
+  "library.opening_hint": "正在读取目录，章节内容会按阅读进度按需加载。",
+  "reader.loading_chapter": "正在加载章节",
   "library.book_count": "共 {} 本",
     "library.last_read_chapter": "上次阅读: {}",
 

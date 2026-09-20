@@ -82,19 +82,20 @@ jobs:
           tag_name: ${{ github.ref_name }}
           name: RustEpubReader ${{ github.ref_name }}
           body: |
-            ## v1.0.14
+            ## v1.0.15
 
             Windows 64 位隐蔽阅读发行版。
 
             ### 修复
-            - 大书首次解析后写入本地缓存，下次启动不再整本重新解析。
-            - 再次打开书库中已有书籍时，跳过整文件哈希和重复拷贝。
+            - 打开书籍改为按需加载：只读目录和当前窗口章节，不再整本解析 / 整本缓存。
+            - 远离当前阅读位置的章节会从内存卸掉。
+            - 书库封面只读取封面图，不再整本解析每本书。
 
             ### 说明
-            - 基于 v1.0.13。
+            - 基于 v1.0.14。
             - CI 发行版构建仍只生成 Windows 桌面端产物。
 
             ### 下载
-            - `RustEpubReader-Win64-v1.0.14.exe`
+            - `RustEpubReader-Win64-v1.0.15.exe`
           files: |
             release-artifacts/RustEpubReader-Win64-*.exe

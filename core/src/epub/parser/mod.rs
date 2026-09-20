@@ -3,7 +3,7 @@ mod html;
 mod image;
 
 use std::collections::{HashMap, HashSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use rbook::ebook::resource::ResourceKey;
 use rbook::epub::Epub as RbookEpub;
@@ -98,6 +98,10 @@ pub struct EpubBook {
     pub chapter_reviews: HashMap<usize, usize>,
     #[serde(default)]
     pub review_chapter_indices: HashSet<usize>,
+    #[serde(skip)]
+    pub source_path: Option<PathBuf>,
+    #[serde(skip)]
+    image_resource_paths: Vec<String>,
 }
 
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
@@ -126,8 +130,72 @@ pub struct EpubMetadata {
     pub chapter_count: Option<usize>,
 }
 
+fn parse_chapter_from_epub(
+    epub: &RbookEpub,
+    href: &str,
+    image_resource_paths: &[String],
+) -> Result<Vec<crate::epub::ContentBlock>, String> {
+    for spine_entry in epub.spine().iter() {
+        let Some(manifest_entry) = spine_entry.manifest_entry() else {
+            continue;
+        };
+        let kind = manifest_entry.kind().as_str();
+        if !kind.starts_with("application/xhtml") && !kind.starts_with("text/html") {
+            continue;
+        }
+        let Some(raw_path) = resource_key_to_string(manifest_entry.resource().key()) else {
+            continue;
+        };
+        let path_str = normalize_resource_path(&raw_path);
+        if !resource_path_matches(&path_str, href) {
+            continue;
+        }
+        let html = manifest_entry
+            .read_str()
+            .map_err(|e| format!("无法读取资源: {path_str}: {e}"))?;
+        let mut image_resources = HashMap::new();
+        load_referenced_images(
+            &html,
+            &path_str,
+            image_resource_paths,
+            &mut image_resources,
+            |resolved| epub.read_resource_bytes(resolved).ok(),
+        );
+        return Ok(parse_html_blocks(&html, &path_str, &image_resources));
+    }
+    Err(format!("未找到章节资源: {href}"))
+}
+
+fn review_chapter_maps(chapters: &[Chapter]) -> (HashMap<usize, usize>, HashSet<usize>) {
+    let mut chapter_reviews = HashMap::new();
+    let mut review_chapter_indices = HashSet::new();
+    const REVIEW_SUFFIX: &str = " - 段评";
+    for (idx, ch) in chapters.iter().enumerate() {
+        if ch.title.ends_with(REVIEW_SUFFIX) {
+            review_chapter_indices.insert(idx);
+            let base_title = &ch.title[..ch.title.len() - REVIEW_SUFFIX.len()];
+            let review_count = chapters[..idx]
+                .iter()
+                .filter(|c| c.title == ch.title)
+                .count();
+            if let Some(main_idx) = chapters
+                .iter()
+                .enumerate()
+                .filter(|(_, c)| c.title == base_title)
+                .nth(review_count)
+                .map(|(i, _)| i)
+            {
+                chapter_reviews.insert(main_idx, idx);
+            }
+        }
+    }
+    (chapter_reviews, review_chapter_indices)
+}
+
 impl EpubBook {
-    pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, String> {
+    /// Open the EPUB index only: spine, TOC, cover, and fonts. Chapter HTML is not parsed.
+    pub fn open_lazy<P: AsRef<Path>>(path: P) -> Result<Self, String> {
+        let path = path.as_ref();
         let epub = RbookEpub::open(path).map_err(|e| format!("无法打开 EPUB 文件: {e}"))?;
         let metadata = epub.metadata();
 
@@ -141,70 +209,45 @@ impl EpubBook {
             .cover_image()
             .and_then(|entry| entry.read_bytes().ok());
 
-        let mut chapters = Vec::new();
-        let mut toc = Vec::new();
-
-        // Build image resource path index (lazy: bytes loaded only when referenced)
         let image_resource_paths: Vec<String> = epub
             .manifest()
             .images()
             .filter_map(|entry| resource_key_to_string(entry.resource().key()))
-            .map(|path| normalize_resource_path(&path))
+            .map(|p| normalize_resource_path(&p))
             .collect();
-        let mut image_resources: HashMap<String, Vec<u8>> = HashMap::new();
 
         let toc_items = collect_toc_items(&epub);
+        let mut chapters = Vec::new();
+        let mut toc = Vec::new();
 
         for spine_entry in epub.spine().iter() {
             let Some(manifest_entry) = spine_entry.manifest_entry() else {
                 continue;
             };
-            let kind = manifest_entry.kind().as_str().to_string();
+            let kind = manifest_entry.kind().as_str();
             if !kind.starts_with("application/xhtml") && !kind.starts_with("text/html") {
                 continue;
             }
-
             let Some(raw_path) = resource_key_to_string(manifest_entry.resource().key()) else {
                 continue;
             };
             let path_str = normalize_resource_path(&raw_path);
-            let html = manifest_entry
-                .read_str()
-                .map_err(|e| format!("无法读取资源: {path_str}: {e}"))?;
-
-            // Lazy-load: only fetch images referenced by this chapter (not all EPUB images)
-            load_referenced_images(
-                &html,
-                &path_str,
-                &image_resource_paths,
-                &mut image_resources,
-                |resolved| epub.read_resource_bytes(resolved).ok(),
-            );
-
-            let blocks = parse_html_blocks(&html, &path_str, &image_resources);
-
             let chapter_title = toc_items
                 .iter()
                 .find(|(_, p)| resource_path_matches(&path_str, p))
                 .map(|(label, _)| label.clone())
                 .unwrap_or_else(|| format!("第 {} 章", chapters.len() + 1));
-
-            if blocks.is_empty() {
-                continue;
-            }
-
             let chapter_idx = chapters.len();
-
+            let in_toc = toc_items
+                .iter()
+                .any(|(_, p)| resource_path_matches(&path_str, p));
             chapters.push(Chapter {
                 title: chapter_title.clone(),
-                blocks,
-                source_href: Some(path_str.clone()),
+                blocks: Vec::new(),
+                source_href: Some(path_str),
+                loaded: false,
             });
-
-            if toc_items
-                .iter()
-                .any(|(_, p)| resource_path_matches(&path_str, p))
-            {
+            if in_toc {
                 toc.push(TocEntry {
                     title: chapter_title,
                     chapter_index: chapter_idx,
@@ -227,8 +270,8 @@ impl EpubBook {
         for entry in epub.manifest().fonts() {
             if let Ok(data) = entry.read_bytes() {
                 let name = resource_key_to_string(entry.resource().key())
-                    .and_then(|path| {
-                        Path::new(&path)
+                    .and_then(|p| {
+                        Path::new(&p)
                             .file_stem()
                             .map(|s| s.to_string_lossy().to_string())
                     })
@@ -237,30 +280,7 @@ impl EpubBook {
             }
         }
 
-        // Identify review chapters (段评) and build mapping
-        let mut chapter_reviews = HashMap::new();
-        let mut review_chapter_indices = HashSet::new();
-        const REVIEW_SUFFIX: &str = " - 段评";
-        for (idx, ch) in chapters.iter().enumerate() {
-            if ch.title.ends_with(REVIEW_SUFFIX) {
-                review_chapter_indices.insert(idx);
-                let base_title = &ch.title[..ch.title.len() - REVIEW_SUFFIX.len()];
-                // Match to the Nth main chapter with the same title
-                let review_count = chapters[..idx]
-                    .iter()
-                    .filter(|c| c.title == ch.title)
-                    .count();
-                if let Some(main_idx) = chapters
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, c)| c.title == base_title)
-                    .nth(review_count)
-                    .map(|(i, _)| i)
-                {
-                    chapter_reviews.insert(main_idx, idx);
-                }
-            }
-        }
+        let (chapter_reviews, review_chapter_indices) = review_chapter_maps(&chapters);
 
         Ok(EpubBook {
             title,
@@ -270,7 +290,83 @@ impl EpubBook {
             fonts,
             chapter_reviews,
             review_chapter_indices,
+            source_path: Some(path.to_path_buf()),
+            image_resource_paths,
         })
+    }
+
+    /// Parse every chapter. Used by export and Android.
+    pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, String> {
+        let mut book = Self::open_lazy(path)?;
+        book.load_all_chapters()?;
+        Ok(book)
+    }
+
+    pub fn load_all_chapters(&mut self) -> Result<(), String> {
+        let Some(path) = self.source_path.clone() else {
+            return Ok(());
+        };
+        let jobs: Vec<(usize, String)> = self
+            .chapters
+            .iter()
+            .enumerate()
+            .filter(|(_, ch)| !ch.loaded)
+            .filter_map(|(i, ch)| ch.source_href.clone().map(|href| (i, href)))
+            .collect();
+        if jobs.is_empty() {
+            return Ok(());
+        }
+        let loaded = Self::parse_chapters_from_file(&path, &jobs, &self.image_resource_paths)?;
+        for (idx, blocks) in loaded {
+            if let Some(chapter) = self.chapters.get_mut(idx) {
+                chapter.blocks = blocks;
+                chapter.loaded = true;
+            }
+        }
+        Ok(())
+    }
+
+    pub fn parse_chapters_from_file(
+        epub_path: &Path,
+        jobs: &[(usize, String)],
+        image_resource_paths: &[String],
+    ) -> Result<Vec<(usize, Vec<crate::epub::ContentBlock>)>, String> {
+        let epub = RbookEpub::open(epub_path).map_err(|e| format!("无法打开 EPUB 文件: {e}"))?;
+        let mut out = Vec::with_capacity(jobs.len());
+        for (idx, href) in jobs {
+            let blocks = parse_chapter_from_epub(&epub, href, image_resource_paths)?;
+            out.push((*idx, blocks));
+        }
+        Ok(out)
+    }
+
+    pub fn apply_loaded_chapter(&mut self, idx: usize, blocks: Vec<crate::epub::ContentBlock>) {
+        if let Some(chapter) = self.chapters.get_mut(idx) {
+            chapter.blocks = blocks;
+            chapter.loaded = true;
+        }
+    }
+
+    pub fn unload_chapter(&mut self, idx: usize) {
+        if let Some(chapter) = self.chapters.get_mut(idx) {
+            chapter.blocks.clear();
+            chapter.loaded = false;
+        }
+    }
+
+    pub fn read_cover<P: AsRef<Path>>(path: P) -> Option<Vec<u8>> {
+        let epub = RbookEpub::open(path).ok()?;
+        epub.manifest()
+            .cover_image()
+            .and_then(|entry| entry.read_bytes().ok())
+    }
+
+    pub fn image_resource_paths(&self) -> &[String] {
+        &self.image_resource_paths
+    }
+
+    pub fn chapter_is_loaded(&self, idx: usize) -> bool {
+        self.chapters.get(idx).map(|ch| ch.loaded).unwrap_or(false)
     }
 
     /// Compute SHA-256 hash of an epub file for cross-device identification

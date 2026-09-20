@@ -33,9 +33,22 @@ impl ReaderApp {
 
                 if run_search && !self.search_query.is_empty() {
                     if let Some(book) = &self.book {
-                        self.search_results =
-                            reader_core::search::search_book(book, &self.search_query, false);
-                        self.search_selected = None;
+                        let unloaded: Vec<usize> = book
+                            .chapters
+                            .iter()
+                            .enumerate()
+                            .filter(|(_, ch)| !ch.loaded)
+                            .map(|(i, _)| i)
+                            .collect();
+                        if unloaded.is_empty() {
+                            self.search_results =
+                                reader_core::search::search_book(book, &self.search_query, false);
+                            self.search_selected = None;
+                            self.pending_search_query = None;
+                        } else {
+                            self.pending_search_query = Some(self.search_query.clone());
+                            self.request_chapter_loads(&unloaded);
+                        }
                     }
                 }
 

@@ -19,7 +19,8 @@
   "library.empty_hint": "Click the button above to open an EPUB book",
   "library.tip": "Tip: Click a card or 'Continue Reading' to resume",
   "library.opening_book": "Opening book",
-  "library.opening_hint": "The first open of a large book parses chapters; later launches use a cache and start much faster.",
+  "library.opening_hint": "Reading the table of contents. Chapter text loads on demand as you scroll.",
+  "reader.loading_chapter": "Loading chapter",
   "library.book_count": "{} books",
     "library.last_read_chapter": "Last read: {}",
 

@@ -67,6 +67,9 @@ pub struct Chapter {
     pub blocks: Vec<ContentBlock>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_href: Option<String>,
+    /// False until this chapter's XHTML has been parsed into `blocks`.
+    #[serde(default)]
+    pub loaded: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

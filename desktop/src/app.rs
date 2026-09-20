@@ -1066,6 +1066,8 @@ pub struct ReaderApp {
     // ── TXT Import ──
     pub txt_import: Option<TxtImportState>,
     pub book_open: Option<BookOpenJob>,
+    pub chapter_load: Option<ChapterLoadJob>,
+    pub(crate) pending_search_query: Option<String>,
     // ── Typography ──
     pub line_spacing: f32,
     pub para_spacing: f32,
@@ -1228,12 +1230,19 @@ pub struct OpenedBook {
     pub path: String,
     pub chapter: Option<usize>,
     pub hash: Option<String>,
-    pub from_cache: bool,
 }
 
 pub struct BookOpenJob {
     pub path: String,
     pub slot: BookOpenSlot,
+}
+
+pub type ChapterLoadSlot =
+    Arc<Mutex<Option<Result<Vec<(usize, Vec<reader_core::epub::ContentBlock>)>, String>>>>;
+
+pub struct ChapterLoadJob {
+    pub indices: Vec<usize>,
+    pub slot: ChapterLoadSlot,
 }
 
 /// TXT 导入对话框状态。
@@ -1390,6 +1399,8 @@ impl Default for ReaderApp {
             _update_progress: None,
             txt_import: None,
             book_open: None,
+            chapter_load: None,
+            pending_search_query: None,
             // Typography
             line_spacing: default_line_spacing(),
             para_spacing: default_para_spacing(),
@@ -1664,16 +1675,12 @@ impl ReaderApp {
             slot,
         });
         std::thread::spawn(move || {
-            let result =
-                EpubBook::open_or_cached(Path::new(&worker_path)).map(|(book, from_cache)| {
-                    OpenedBook {
-                        book,
-                        path: worker_path,
-                        chapter,
-                        hash: None,
-                        from_cache,
-                    }
-                });
+            let result = EpubBook::open_lazy(&worker_path).map(|book| OpenedBook {
+                book,
+                path: worker_path,
+                chapter,
+                hash: None,
+            });
             if let Ok(mut guard) = slot_clone.lock() {
                 *guard = Some(result);
             }
@@ -1708,14 +1715,12 @@ impl ReaderApp {
             path,
             chapter,
             hash,
-            from_cache,
         } = opened;
         self.push_feedback_log(format!(
-            "[Book] opened: title={}, chapters={}, fonts={}, cache={}",
+            "[Book] opened (lazy): title={}, chapters={}, fonts={}",
             book.title,
             book.chapters.len(),
-            book.fonts.len(),
-            from_cache
+            book.fonts.len()
         ));
         let mut ch = chapter.unwrap_or(0);
         if !book.chapters.is_empty() {
@@ -1734,16 +1739,6 @@ impl ReaderApp {
         let font_names: Vec<String> = book.fonts.iter().map(|(name, _)| name.clone()).collect();
         self.embedded_font_names = font_names;
         self.embedded_fonts_registered = false;
-        if !from_cache {
-            let cache_epub = entry.path.clone();
-            let book_for_cache = book.clone();
-            std::thread::spawn(move || {
-                if let Err(e) = EpubBook::save_parse_cache(Path::new(&cache_epub), &book_for_cache)
-                {
-                    eprintln!("[Book] failed to save parse cache: {e}");
-                }
-            });
-        }
         self.book = Some(book);
         self.current_book_hash = hash;
         self.book_path = Some(entry.path.clone());
@@ -1775,13 +1770,127 @@ impl ReaderApp {
             entry.path
         ));
         self.csc_cache.clear();
-        self.csc_trigger_chapter(ch);
+        let mut prefetch = vec![ch];
         let total = self.total_chapters();
         if ch > 0 {
-            self.csc_trigger_chapter(ch - 1);
+            prefetch.push(ch - 1);
         }
         if ch + 1 < total {
-            self.csc_trigger_chapter(ch + 1);
+            prefetch.push(ch + 1);
+        }
+        self.request_chapter_loads(&prefetch);
+    }
+
+    pub(crate) fn request_chapter_loads(&mut self, indices: &[usize]) {
+        if self.chapter_load.is_some() {
+            return;
+        }
+        let Some(book) = &self.book else {
+            return;
+        };
+        let Some(epub_path) = book.source_path.clone() else {
+            return;
+        };
+        let image_paths = book.image_resource_paths().to_vec();
+        let jobs: Vec<(usize, String)> = indices
+            .iter()
+            .copied()
+            .filter_map(|idx| {
+                let chapter = book.chapters.get(idx)?;
+                if chapter.loaded {
+                    return None;
+                }
+                Some((idx, chapter.source_href.clone()?))
+            })
+            .collect();
+        if jobs.is_empty() {
+            return;
+        }
+        let indices: Vec<usize> = jobs.iter().map(|(i, _)| *i).collect();
+        let slot: ChapterLoadSlot = Arc::new(Mutex::new(None));
+        let slot_clone = slot.clone();
+        self.chapter_load = Some(ChapterLoadJob { indices, slot });
+        std::thread::spawn(move || {
+            let result = EpubBook::parse_chapters_from_file(&epub_path, &jobs, &image_paths);
+            if let Ok(mut guard) = slot_clone.lock() {
+                *guard = Some(result);
+            }
+        });
+    }
+
+    fn poll_chapter_load(&mut self, ctx: &egui::Context) {
+        let mut finished = None;
+        if let Some(job) = &self.chapter_load {
+            if let Ok(mut guard) = job.slot.try_lock() {
+                finished = guard.take();
+            }
+        }
+        if let Some(result) = finished {
+            self.chapter_load = None;
+            match result {
+                Ok(chapters) => {
+                    let loaded_idx: Vec<usize> = chapters.iter().map(|(i, _)| *i).collect();
+                    if let Some(book) = &mut self.book {
+                        for (idx, blocks) in chapters {
+                            book.apply_loaded_chapter(idx, blocks);
+                        }
+                    }
+                    self.pages_dirty = true;
+                    for idx in loaded_idx {
+                        self.csc_trigger_chapter(idx);
+                    }
+                    if let Some(query) = self.pending_search_query.clone() {
+                        let unloaded: Vec<usize> = self
+                            .book
+                            .as_ref()
+                            .map(|book| {
+                                book.chapters
+                                    .iter()
+                                    .enumerate()
+                                    .filter(|(_, ch)| !ch.loaded)
+                                    .map(|(i, _)| i)
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+                        if unloaded.is_empty() {
+                            if let Some(book) = &self.book {
+                                self.search_results =
+                                    reader_core::search::search_book(book, &query, false);
+                                self.search_selected = None;
+                            }
+                            self.pending_search_query = None;
+                        } else {
+                            self.request_chapter_loads(&unloaded);
+                        }
+                    }
+                    self.push_feedback_log("[Book] chapter batch loaded".to_string());
+                }
+                Err(e) => {
+                    self.push_feedback_log(format!("[Book] chapter load error: {e}"));
+                    self.error_msg = Some(e);
+                }
+            }
+        }
+        if self.chapter_load.is_some() {
+            ctx.request_repaint();
+        }
+    }
+
+    pub(crate) fn evict_far_chapters(&mut self) {
+        if self.show_search || self.pending_search_query.is_some() {
+            return;
+        }
+        let Some(book) = &mut self.book else {
+            return;
+        };
+        let start = self.continuous_scroll.start_chapter.saturating_sub(1);
+        let end = (self.continuous_scroll.loaded_end + 1).min(book.chapters.len());
+        let current = self.current_chapter;
+        for (idx, chapter) in book.chapters.iter_mut().enumerate() {
+            if chapter.loaded && idx != current && (idx < start || idx >= end) {
+                chapter.blocks.clear();
+                chapter.loaded = false;
+            }
         }
     }
 
@@ -1831,15 +1940,14 @@ impl ReaderApp {
                 self.library
                     .update_chapter(&self.data_dir, p, self.current_chapter, chap_title);
             }
-            // Trigger CSC for this chapter + prefetch prev & next
-            self.csc_trigger_chapter(self.current_chapter);
+            let mut prefetch = vec![self.current_chapter];
             if self.current_chapter > 0 {
-                self.csc_trigger_chapter(self.current_chapter - 1);
+                prefetch.push(self.current_chapter - 1);
             }
             if self.current_chapter + 1 < total {
-                self.csc_trigger_chapter(self.current_chapter + 1);
+                prefetch.push(self.current_chapter + 1);
             }
-            // Check if user should be prompted to contribute
+            self.request_chapter_loads(&prefetch);
             self.csc_check_contribution_prompt();
             self.tts_detach_view();
         }
@@ -1862,16 +1970,15 @@ impl ReaderApp {
                 self.library
                     .update_chapter(&self.data_dir, p, self.current_chapter, chap_title);
             }
-            // Trigger CSC for this chapter + prefetch prev & next
             let total = self.total_chapters();
-            self.csc_trigger_chapter(self.current_chapter);
+            let mut prefetch = vec![self.current_chapter];
             if self.current_chapter > 0 {
-                self.csc_trigger_chapter(self.current_chapter - 1);
+                prefetch.push(self.current_chapter - 1);
             }
             if self.current_chapter + 1 < total {
-                self.csc_trigger_chapter(self.current_chapter + 1);
+                prefetch.push(self.current_chapter + 1);
             }
-            // Check if user should be prompted to contribute
+            self.request_chapter_loads(&prefetch);
             self.csc_check_contribution_prompt();
             self.tts_detach_view();
         }
@@ -2668,6 +2775,7 @@ impl eframe::App for ReaderApp {
         // --- Poll CSC background results ---
         self.csc_poll_results();
         self.poll_book_open(ctx);
+        self.poll_chapter_load(ctx);
 
         // --- Poll startup update check result ---
         if matches!(self.update_state, UpdateState::Checking) {

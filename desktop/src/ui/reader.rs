@@ -259,14 +259,25 @@ impl ReaderApp {
                 }
                 let loaded_end = self.continuous_scroll.loaded_end;
                 let start_chapter = self.continuous_scroll.start_chapter;
+                let need_load: Vec<usize> = (start_chapter..loaded_end).collect();
+                self.request_chapter_loads(&need_load);
                 let scroll_adjustment = self.continuous_scroll.take_scroll_adjustment();
-                let continuous_chapters: Vec<(String, Vec<ContentBlock>)> = self
+                let continuous_chapters: Vec<(String, Option<Vec<ContentBlock>>)> = self
                     .book
                     .as_ref()
                     .map(|book| {
                         book.chapters[start_chapter..loaded_end]
                             .iter()
-                            .map(|chapter| (chapter.title.clone(), chapter.blocks.clone()))
+                            .map(|chapter| {
+                                (
+                                    chapter.title.clone(),
+                                    if chapter.loaded {
+                                        Some(chapter.blocks.clone())
+                                    } else {
+                                        None
+                                    },
+                                )
+                            })
                             .collect()
                     })
                     .unwrap_or_default();
@@ -315,12 +326,24 @@ impl ReaderApp {
                         (self.continuous_scroll.scroll_offset + scroll_adjustment).max(0.0),
                     );
                 }
+                let loading_label = self.i18n.t("reader.loading_chapter").to_string();
                 let scroll_output = scroll_area.show(ui, |ui| {
                     for (offset, (chapter_title, chapter_blocks)) in
                         continuous_chapters.iter().enumerate()
                     {
                         let chapter_idx = start_chapter + offset;
                         let chapter_top = ui.cursor().top();
+                        let Some(chapter_blocks) = chapter_blocks else {
+                            ui.horizontal(|ui| {
+                                ui.spinner();
+                                ui.label(format!("{loading_label} · {chapter_title}"));
+                            });
+                            ui.add_space(240.0);
+                            let chapter_height = (ui.cursor().top() - chapter_top).max(0.0);
+                            self.continuous_scroll
+                                .record_height(chapter_idx, chapter_height);
+                            continue;
+                        };
                         let chapter_ranges = loaded_highlights.get(&chapter_idx).unwrap_or(
                             if chapter_idx == self.current_chapter {
                                 &highlight_ranges
@@ -392,14 +415,19 @@ impl ReaderApp {
                 let near_start = self.continuous_scroll.near_start();
                 let near_end = self.continuous_scroll.near_end();
                 if near_start {
-                    if self.continuous_scroll.prepend_previous().is_some() {
+                    if let Some(idx) = self.continuous_scroll.prepend_previous() {
+                        self.request_chapter_loads(&[idx]);
                         self.continuous_scroll.trim_bottom();
                         ui.ctx().request_repaint();
                     }
-                } else if near_end && self.continuous_scroll.append_next(total_ch).is_some() {
-                    self.continuous_scroll.trim_window();
-                    ui.ctx().request_repaint();
+                } else if near_end {
+                    if let Some(idx) = self.continuous_scroll.append_next(total_ch) {
+                        self.request_chapter_loads(&[idx]);
+                        self.continuous_scroll.trim_window();
+                        ui.ctx().request_repaint();
+                    }
                 }
+                self.evict_far_chapters();
             } else {
                 let page_rect = ui.available_rect_before_wrap();
                 self.paging_page_rect = Some(page_rect);

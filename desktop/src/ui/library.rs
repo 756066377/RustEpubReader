@@ -183,9 +183,8 @@ impl ReaderApp {
                     }
                     covers_loaded += 1;
                     let tex = (|| {
-                        let book = EpubBook::open(&path).ok()?;
-                        let cover_bytes = book.cover_data.as_ref()?;
-                        let img = image::load_from_memory(cover_bytes).ok()?;
+                        let cover_bytes = EpubBook::read_cover(&path)?;
+                        let img = image::load_from_memory(&cover_bytes).ok()?;
                         let mut rgba = img.to_rgba8();
                         apply_rounded_corners_rgba(&mut rgba, 18);
                         let size = [rgba.width() as usize, rgba.height() as usize];
