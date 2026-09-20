@@ -139,7 +139,7 @@ fn parse_chapter_from_epub(
         let Some(manifest_entry) = spine_entry.manifest_entry() else {
             continue;
         };
-        let kind = manifest_entry.kind().as_str();
+        let kind = manifest_entry.kind().as_str().to_string();
         if !kind.starts_with("application/xhtml") && !kind.starts_with("text/html") {
             continue;
         }
@@ -224,7 +224,7 @@ impl EpubBook {
             let Some(manifest_entry) = spine_entry.manifest_entry() else {
                 continue;
             };
-            let kind = manifest_entry.kind().as_str();
+            let kind = manifest_entry.kind().as_str().to_string();
             if !kind.starts_with("application/xhtml") && !kind.starts_with("text/html") {
                 continue;
             }
