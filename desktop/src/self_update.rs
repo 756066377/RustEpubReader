@@ -533,7 +533,7 @@ mod tests {
 
     #[test]
     fn download_urls_use_this_fork_github_release() {
-        let original = "https://github.com/756066377/RustEpubReader/releases/download/v1.0.15/RustEpubReader-Win64-v1.0.15.exe";
+        let original = "https://github.com/756066377/RustEpubReader/releases/download/v1.0.16/RustEpubReader-Win64-v1.0.16.exe";
         let urls = build_download_urls(original);
         assert_eq!(urls, vec![original]);
     }

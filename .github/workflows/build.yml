@@ -82,20 +82,19 @@ jobs:
           tag_name: ${{ github.ref_name }}
           name: RustEpubReader ${{ github.ref_name }}
           body: |
-            ## v1.0.15
+            ## v1.0.16
 
             Windows 64 位隐蔽阅读发行版。
 
             ### 修复
-            - 打开书籍改为按需加载：只读目录和当前窗口章节，不再整本解析 / 整本缓存。
-            - 远离当前阅读位置的章节会从内存卸掉。
-            - 书库封面只读取封面图，不再整本解析每本书。
+            - 快速滚动时取消已经划走的章节解析，同一时间只解析当前窗口需要的章节。
+            - 卸载的章节保留原高度占位，滚动偏移按高度差补偿，避免回滑跳帧。
 
             ### 说明
-            - 基于 v1.0.14。
+            - 基于 v1.0.15。
             - CI 发行版构建仍只生成 Windows 桌面端产物。
 
             ### 下载
-            - `RustEpubReader-Win64-v1.0.15.exe`
+            - `RustEpubReader-Win64-v1.0.16.exe`
           files: |
             release-artifacts/RustEpubReader-Win64-*.exe

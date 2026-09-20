@@ -334,14 +334,16 @@ impl ReaderApp {
                         let chapter_idx = start_chapter + offset;
                         let chapter_top = ui.cursor().top();
                         let Some(chapter_blocks) = chapter_blocks else {
-                            ui.horizontal(|ui| {
-                                ui.spinner();
-                                ui.label(format!("{loading_label} · {chapter_title}"));
+                            let placeholder =
+                                self.continuous_scroll.height_or_placeholder(chapter_idx);
+                            let size = egui::vec2(ui.available_width(), placeholder);
+                            let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
+                            ui.allocate_new_ui(UiBuilder::new().max_rect(rect), |ui| {
+                                ui.horizontal(|ui| {
+                                    ui.spinner();
+                                    ui.label(format!("{loading_label} · {chapter_title}"));
+                                });
                             });
-                            ui.add_space(240.0);
-                            let chapter_height = (ui.cursor().top() - chapter_top).max(0.0);
-                            self.continuous_scroll
-                                .record_height(chapter_idx, chapter_height);
                             continue;
                         };
                         let chapter_ranges = loaded_highlights.get(&chapter_idx).unwrap_or(

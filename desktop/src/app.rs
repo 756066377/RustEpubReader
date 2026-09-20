@@ -1,5 +1,5 @@
 //! The Desktop application state machine, defining main app logic.
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -1242,6 +1242,8 @@ pub type ChapterLoadSlot =
 
 pub struct ChapterLoadJob {
     pub indices: Vec<usize>,
+    pub wanted: Arc<Mutex<HashSet<usize>>>,
+    pub cancel: Arc<AtomicBool>,
     pub slot: ChapterLoadSlot,
 }
 
@@ -1782,36 +1784,73 @@ impl ReaderApp {
     }
 
     pub(crate) fn request_chapter_loads(&mut self, indices: &[usize]) {
-        if self.chapter_load.is_some() {
-            return;
-        }
         let Some(book) = &self.book else {
             return;
         };
+        let needed: Vec<usize> = indices
+            .iter()
+            .copied()
+            .filter(|&idx| {
+                book.chapters
+                    .get(idx)
+                    .is_some_and(|chapter| !chapter.loaded && chapter.source_href.is_some())
+            })
+            .collect();
+        let searching = self.pending_search_query.is_some() || self.show_search;
+
+        if let Some(job) = &self.chapter_load {
+            if let Ok(mut wanted) = job.wanted.lock() {
+                wanted.clear();
+                wanted.extend(needed.iter().copied());
+            }
+            if !searching && needed.iter().all(|idx| !job.indices.contains(idx)) {
+                job.cancel.store(true, Ordering::Relaxed);
+            }
+            return;
+        }
+
+        if needed.is_empty() {
+            return;
+        }
         let Some(epub_path) = book.source_path.clone() else {
             return;
         };
         let image_paths = book.image_resource_paths().to_vec();
-        let jobs: Vec<(usize, String)> = indices
+        let jobs: Vec<(usize, String)> = needed
             .iter()
             .copied()
             .filter_map(|idx| {
-                let chapter = book.chapters.get(idx)?;
-                if chapter.loaded {
-                    return None;
-                }
-                Some((idx, chapter.source_href.clone()?))
+                book.chapters
+                    .get(idx)
+                    .and_then(|chapter| chapter.source_href.clone())
+                    .map(|href| (idx, href))
             })
             .collect();
         if jobs.is_empty() {
             return;
         }
         let indices: Vec<usize> = jobs.iter().map(|(i, _)| *i).collect();
+        let wanted = Arc::new(Mutex::new(indices.iter().copied().collect::<HashSet<_>>()));
+        let cancel = Arc::new(AtomicBool::new(false));
         let slot: ChapterLoadSlot = Arc::new(Mutex::new(None));
         let slot_clone = slot.clone();
-        self.chapter_load = Some(ChapterLoadJob { indices, slot });
+        let wanted_clone = wanted.clone();
+        let cancel_clone = cancel.clone();
+        self.chapter_load = Some(ChapterLoadJob {
+            indices,
+            wanted,
+            cancel,
+            slot,
+        });
         std::thread::spawn(move || {
-            let result = EpubBook::parse_chapters_from_file(&epub_path, &jobs, &image_paths);
+            let result =
+                EpubBook::parse_chapters_from_file_while(&epub_path, &jobs, &image_paths, |idx| {
+                    !cancel_clone.load(Ordering::Relaxed)
+                        && wanted_clone
+                            .lock()
+                            .map(|wanted| wanted.contains(&idx))
+                            .unwrap_or(false)
+                });
             if let Ok(mut guard) = slot_clone.lock() {
                 *guard = Some(result);
             }
@@ -1829,10 +1868,24 @@ impl ReaderApp {
             self.chapter_load = None;
             match result {
                 Ok(chapters) => {
-                    let loaded_idx: Vec<usize> = chapters.iter().map(|(i, _)| *i).collect();
+                    let searching = self.pending_search_query.is_some() || self.show_search;
+                    let keep_start = self.continuous_scroll.start_chapter.saturating_sub(1);
+                    let keep_end =
+                        (self.continuous_scroll.loaded_end + 1).min(self.total_chapters());
+                    let current = self.current_chapter;
+                    let loaded_idx: Vec<usize> = chapters
+                        .iter()
+                        .map(|(i, _)| *i)
+                        .filter(|&idx| {
+                            searching || idx == current || (idx >= keep_start && idx < keep_end)
+                        })
+                        .collect();
                     if let Some(book) = &mut self.book {
                         for (idx, blocks) in chapters {
-                            book.apply_loaded_chapter(idx, blocks);
+                            if searching || idx == current || (idx >= keep_start && idx < keep_end)
+                            {
+                                book.apply_loaded_chapter(idx, blocks);
+                            }
                         }
                     }
                     self.pages_dirty = true;

@@ -331,10 +331,25 @@ impl EpubBook {
         jobs: &[(usize, String)],
         image_resource_paths: &[String],
     ) -> Result<Vec<(usize, Vec<crate::epub::ContentBlock>)>, String> {
+        Self::parse_chapters_from_file_while(epub_path, jobs, image_resource_paths, |_| true)
+    }
+
+    pub fn parse_chapters_from_file_while(
+        epub_path: &Path,
+        jobs: &[(usize, String)],
+        image_resource_paths: &[String],
+        keep: impl Fn(usize) -> bool,
+    ) -> Result<Vec<(usize, Vec<crate::epub::ContentBlock>)>, String> {
         let epub = RbookEpub::open(epub_path).map_err(|e| format!("无法打开 EPUB 文件: {e}"))?;
         let mut out = Vec::with_capacity(jobs.len());
         for (idx, href) in jobs {
+            if !keep(*idx) {
+                continue;
+            }
             let blocks = parse_chapter_from_epub(&epub, href, image_resource_paths)?;
+            if !keep(*idx) {
+                continue;
+            }
             out.push((*idx, blocks));
         }
         Ok(out)

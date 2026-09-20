@@ -33,6 +33,8 @@ pub(crate) fn text_indent() -> f32 {
     TEXT_INDENT.get()
 }
 
+pub(crate) const CHAPTER_PLACEHOLDER_HEIGHT: f32 = 240.0;
+
 /// State for the chapter window used by continuous reading mode.
 /// This remains independent from paging state during the incremental rollout.
 #[derive(Debug, Default)]
@@ -92,9 +94,9 @@ impl ContinuousScrollState {
             return None;
         }
         self.start_chapter -= 1;
-        if let Some(height) = self.chapter_heights.get(&self.start_chapter).copied() {
-            self.pending_scroll_adjustment += height;
-        } else {
+        let height = self.height_or_placeholder(self.start_chapter);
+        self.pending_scroll_adjustment += height;
+        if !self.chapter_heights.contains_key(&self.start_chapter) {
             self.awaiting_prepend_measurement = true;
         }
         Some(self.start_chapter)
@@ -105,9 +107,7 @@ impl ContinuousScrollState {
         while self.loaded_end.saturating_sub(self.start_chapter) > MAX_LOADED_CHAPTERS
             && self.start_chapter < self.visible_chapter
         {
-            let Some(height) = self.chapter_heights.get(&self.start_chapter).copied() else {
-                break;
-            };
+            let height = self.height_or_placeholder(self.start_chapter);
             self.pending_scroll_adjustment -= height;
             self.start_chapter += 1;
         }
@@ -148,13 +148,30 @@ impl ContinuousScrollState {
         changed
     }
 
+    pub(crate) fn height_or_placeholder(&self, chapter: usize) -> f32 {
+        self.chapter_heights
+            .get(&chapter)
+            .copied()
+            .filter(|height| height.is_finite() && *height > 0.0)
+            .unwrap_or(CHAPTER_PLACEHOLDER_HEIGHT)
+    }
+
     pub(crate) fn record_height(&mut self, chapter: usize, height: f32) {
-        if height.is_finite() && height > 0.0 {
-            self.chapter_heights.insert(chapter, height);
-            if self.awaiting_prepend_measurement && chapter == self.start_chapter {
-                self.pending_scroll_adjustment += height;
-                self.awaiting_prepend_measurement = false;
-            }
+        if !height.is_finite() || height <= 0.0 {
+            return;
+        }
+        let old = self.chapter_heights.insert(chapter, height);
+        if chapter < self.visible_chapter {
+            let baseline = old.unwrap_or(CHAPTER_PLACEHOLDER_HEIGHT);
+            self.pending_scroll_adjustment += height - baseline;
+        } else if old.is_none()
+            && self.awaiting_prepend_measurement
+            && chapter == self.start_chapter
+        {
+            self.pending_scroll_adjustment += height;
+        }
+        if self.awaiting_prepend_measurement && chapter == self.start_chapter {
+            self.awaiting_prepend_measurement = false;
         }
     }
 
@@ -571,6 +588,30 @@ mod tests {
 
         state.allow_prepend_after_user_scroll(24.0);
         assert!(state.near_start());
+    }
+
+    #[test]
+    fn trim_window_uses_placeholder_height_when_unmeasured() {
+        let mut state = ContinuousScrollState::default();
+        state.reset(0, 8);
+        for _ in 0..4 {
+            assert!(state.append_next(8).is_some());
+        }
+        state.set_visible_chapter(1);
+        state.trim_window();
+        assert_eq!(state.start_chapter, 1);
+        assert_eq!(state.loaded_end, 5);
+        assert_eq!(state.take_scroll_adjustment(), -CHAPTER_PLACEHOLDER_HEIGHT);
+    }
+
+    #[test]
+    fn measured_height_replaces_placeholder_without_losing_anchor() {
+        let mut state = ContinuousScrollState::default();
+        state.reset(2, 5);
+        state.set_visible_chapter(2);
+        assert_eq!(state.prepend_previous(), Some(1));
+        state.record_height(1, 400.0);
+        assert_eq!(state.take_scroll_adjustment(), 400.0);
     }
 
     #[test]
