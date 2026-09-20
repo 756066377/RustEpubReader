@@ -1065,6 +1065,7 @@ pub struct ReaderApp {
     pub _update_progress: Option<Arc<Mutex<f32>>>,
     // ── TXT Import ──
     pub txt_import: Option<TxtImportState>,
+    pub book_open: Option<BookOpenJob>,
     // ── Typography ──
     pub line_spacing: f32,
     pub para_spacing: f32,
@@ -1220,6 +1221,19 @@ pub struct CrossChapterSnapshot {
 }
 
 pub type TxtConvertSlot = Arc<Mutex<Option<Result<reader_core::txt::ConvertResult, String>>>>;
+pub type BookOpenSlot = Arc<Mutex<Option<Result<OpenedBook, String>>>>;
+
+pub struct OpenedBook {
+    pub book: EpubBook,
+    pub path: String,
+    pub chapter: Option<usize>,
+    pub hash: Option<String>,
+}
+
+pub struct BookOpenJob {
+    pub path: String,
+    pub slot: BookOpenSlot,
+}
 
 /// TXT 导入对话框状态。
 pub struct TxtImportState {
@@ -1374,6 +1388,7 @@ impl Default for ReaderApp {
             _update_download_slot: None,
             _update_progress: None,
             txt_import: None,
+            book_open: None,
             // Typography
             line_spacing: default_line_spacing(),
             para_spacing: default_para_spacing(),
@@ -1639,97 +1654,142 @@ impl ReaderApp {
             "[Book] open_book_from_path: path={}, chapter={:?}",
             path, chapter
         ));
-        match EpubBook::open(path) {
-            Ok(mut book) => {
-                self.push_feedback_log(format!(
-                    "[Book] opened: title={}, chapters={}, fonts={}",
-                    book.title,
-                    book.chapters.len(),
-                    book.fonts.len()
-                ));
-                let mut ch = chapter.unwrap_or(0);
-                if !book.chapters.is_empty() {
-                    ch = ch.min(book.chapters.len() - 1);
-                }
-
-                let initial_title = book.title.clone();
-                let initial_chapter_title = book.chapters.get(ch).map(|c| c.title.clone());
-                let mut entry = self.library.add_or_update(
-                    &self.data_dir,
-                    initial_title,
-                    path.to_string(),
-                    ch,
-                    initial_chapter_title,
-                );
-
-                if entry.path != path {
-                    if let Ok(managed_book) = EpubBook::open(&entry.path) {
-                        book = managed_book;
-                        if !book.chapters.is_empty() {
-                            ch = ch.min(book.chapters.len() - 1);
-                        }
-                        let chapter_title = book.chapters.get(ch).map(|c| c.title.clone());
-                        entry = self.library.add_or_update(
-                            &self.data_dir,
-                            book.title.clone(),
-                            entry.path.clone(),
-                            ch,
-                            chapter_title,
-                        );
-                    }
-                }
-
-                let font_names: Vec<String> =
-                    book.fonts.iter().map(|(name, _)| name.clone()).collect();
-                self.embedded_font_names = font_names;
-                self.embedded_fonts_registered = false;
-                self.book = Some(book);
-                self.current_book_hash = EpubBook::file_hash(&entry.path).ok();
-                self.book_path = Some(entry.path.clone());
-                self.current_chapter = ch;
-                self.last_synced_chapter = None; // Reset so progress is pushed immediately on first update
-                self.last_synced_block = None;
-                self.current_block = entry.last_block;
-                self.pending_restore_block = Some(entry.last_block);
-                self.scroll_to_top = entry.last_block == 0;
-                self.pages_dirty = true;
-                self.current_page = 0;
-                self.view = AppView::Reader;
-                self.error_msg = None;
-                // Reset review panel when opening a new book
-                self.show_review_panel = false;
-                self.review_panel_chapter = None;
-                self.review_panel_anchor = None;
-                self.review_panel_just_opened = false;
-                self.review_panel_scroll_offset = None;
-                self.review_panel_show_all = true;
-                // Load annotation config and start reading timer
-                self.book_config =
-                    reader_core::library::Library::read_book_config(&self.data_dir, &entry.id);
-                self.reading_session_start = Some(reader_core::now_secs());
-                self.push_feedback_log(format!(
-                    "[Book] ready: chapter={}/{}, embedded_fonts={}, path={}",
-                    ch,
-                    self.total_chapters(),
-                    self.embedded_font_names.len(),
-                    entry.path
-                ));
-                // Trigger CSC correction for current + adjacent chapters
-                self.csc_cache.clear();
-                self.csc_trigger_chapter(ch);
-                let total = self.total_chapters();
-                if ch > 0 {
-                    self.csc_trigger_chapter(ch - 1);
-                }
-                if ch + 1 < total {
-                    self.csc_trigger_chapter(ch + 1);
-                }
+        let path = path.to_string();
+        let slot: BookOpenSlot = Arc::new(Mutex::new(None));
+        let slot_clone = slot.clone();
+        let worker_path = path.clone();
+        self.book_open = Some(BookOpenJob {
+            path: path.clone(),
+            slot,
+        });
+        std::thread::spawn(move || {
+            let result = EpubBook::open(&worker_path).map(|book| OpenedBook {
+                hash: EpubBook::file_hash(&worker_path).ok(),
+                book,
+                path: worker_path,
+                chapter,
+            });
+            if let Ok(mut guard) = slot_clone.lock() {
+                *guard = Some(result);
             }
-            Err(e) => {
-                self.push_feedback_log(format!("[Book] ERROR opening {}: {}", path, e));
-                self.error_msg = Some(e);
+        });
+    }
+
+    fn poll_book_open(&mut self, ctx: &egui::Context) {
+        let mut finished = None;
+        if let Some(job) = &self.book_open {
+            if let Ok(mut guard) = job.slot.try_lock() {
+                finished = guard.take();
             }
         }
+        if let Some(result) = finished {
+            self.book_open = None;
+            match result {
+                Ok(opened) => self.apply_opened_book(opened),
+                Err(e) => {
+                    self.push_feedback_log(format!("[Book] ERROR opening: {e}"));
+                    self.error_msg = Some(e);
+                }
+            }
+        }
+        if self.book_open.is_some() {
+            ctx.request_repaint();
+        }
+    }
+
+    fn apply_opened_book(&mut self, opened: OpenedBook) {
+        let OpenedBook {
+            book,
+            path,
+            chapter,
+            hash,
+        } = opened;
+        self.push_feedback_log(format!(
+            "[Book] opened: title={}, chapters={}, fonts={}",
+            book.title,
+            book.chapters.len(),
+            book.fonts.len()
+        ));
+        let mut ch = chapter.unwrap_or(0);
+        if !book.chapters.is_empty() {
+            ch = ch.min(book.chapters.len() - 1);
+        }
+
+        let initial_chapter_title = book.chapters.get(ch).map(|c| c.title.clone());
+        let entry = self.library.add_or_update(
+            &self.data_dir,
+            book.title.clone(),
+            path,
+            ch,
+            initial_chapter_title,
+        );
+
+        let font_names: Vec<String> = book.fonts.iter().map(|(name, _)| name.clone()).collect();
+        self.embedded_font_names = font_names;
+        self.embedded_fonts_registered = false;
+        self.book = Some(book);
+        self.current_book_hash = hash;
+        self.book_path = Some(entry.path.clone());
+        self.current_chapter = ch;
+        self.last_synced_chapter = None;
+        self.last_synced_block = None;
+        self.current_block = entry.last_block;
+        self.pending_restore_block = Some(entry.last_block);
+        self.scroll_to_top = entry.last_block == 0;
+        self.pages_dirty = true;
+        self.current_page = 0;
+        self.continuous_scroll = ContinuousScrollState::default();
+        self.view = AppView::Reader;
+        self.error_msg = None;
+        self.show_review_panel = false;
+        self.review_panel_chapter = None;
+        self.review_panel_anchor = None;
+        self.review_panel_just_opened = false;
+        self.review_panel_scroll_offset = None;
+        self.review_panel_show_all = true;
+        self.book_config =
+            reader_core::library::Library::read_book_config(&self.data_dir, &entry.id);
+        self.reading_session_start = Some(reader_core::now_secs());
+        self.push_feedback_log(format!(
+            "[Book] ready: chapter={}/{}, embedded_fonts={}, path={}",
+            ch,
+            self.total_chapters(),
+            self.embedded_font_names.len(),
+            entry.path
+        ));
+        self.csc_cache.clear();
+        self.csc_trigger_chapter(ch);
+        let total = self.total_chapters();
+        if ch > 0 {
+            self.csc_trigger_chapter(ch - 1);
+        }
+        if ch + 1 < total {
+            self.csc_trigger_chapter(ch + 1);
+        }
+    }
+
+    fn render_book_opening(&self, ctx: &egui::Context) {
+        let Some(job) = &self.book_open else {
+            return;
+        };
+        let file_name = Path::new(&job.path)
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| job.path.clone());
+        let title = self.i18n.t("library.opening_book").to_string();
+        let hint = self.i18n.t("library.opening_hint").to_string();
+        egui::Window::new(title)
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    ui.label(file_name);
+                });
+                ui.add_space(6.0);
+                ui.label(hint);
+            });
     }
 
     pub fn total_chapters(&self) -> usize {
@@ -2590,6 +2650,7 @@ impl eframe::App for ReaderApp {
 
         // --- Poll CSC background results ---
         self.csc_poll_results();
+        self.poll_book_open(ctx);
 
         // --- Poll startup update check result ---
         if matches!(self.update_state, UpdateState::Checking) {
@@ -3180,6 +3241,7 @@ impl eframe::App for ReaderApp {
         if self.txt_import.is_some() {
             self.render_txt_import(ctx);
         }
+        self.render_book_opening(ctx);
 
         self.sync_root_viewport_geometry(ctx);
         let settings = AppSettings::from_app(self);

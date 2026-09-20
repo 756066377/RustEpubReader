@@ -18,6 +18,8 @@
   "library.empty": "Library is empty",
   "library.empty_hint": "Click the button above to open an EPUB book",
   "library.tip": "Tip: Click a card or 'Continue Reading' to resume",
+  "library.opening_book": "Opening book",
+  "library.opening_hint": "Large books take time to parse. This runs in the background so the window stays responsive.",
   "library.book_count": "{} books",
     "library.last_read_chapter": "Last read: {}",
 
