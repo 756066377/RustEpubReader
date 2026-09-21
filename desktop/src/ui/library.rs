@@ -198,214 +198,220 @@ impl ReaderApp {
                     e.insert(tex);
                 }
             }
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.add_space(32.0);
-                    ui.label(
-                        egui::RichText::new(
-                            self.i18n
-                                .tf1("library.book_count", &sorted.len().to_string()),
-                        )
-                        .size(13.0)
-                        .color(subtitle_color),
-                    );
-                    ui.add_space(10.0);
-                    ui.label(
-                        egui::RichText::new(self.i18n.t("library.tip"))
-                            .size(12.5)
-                            .color(subtitle_color),
-                    );
-                });
-                ui.add_space(12.0);
-                // Match the 32px horizontal padding used by the header so the
-                // last card always has a visible right margin.
-                let padding = LIBRARY_GRID_PADDING;
-                let gap = LIBRARY_GRID_GAP;
-                // Keep every book card at a fixed width. Only the number of columns changes
-                // with the window size, so cards don't stretch/shrink when resizing the window.
-                let card_width = LIBRARY_CARD_WIDTH;
-                let cols = library_grid_columns(ui.available_width());
-                // Fixed card height keeps rows uniform regardless of text wrapping.
-                let card_height = LIBRARY_CARD_HEIGHT;
-                let cover_w = LIBRARY_COVER_WIDTH;
-                let chunks: Vec<Vec<usize>> = sorted.chunks(cols).map(|c| c.to_vec()).collect();
-                let leading_pad = padding;
-                for chunk in &chunks {
+            egui::ScrollArea::vertical()
+                .auto_shrink([false; 2])
+                .show(ui, |ui| {
                     ui.horizontal(|ui| {
-                        ui.add_space(leading_pad);
-                        for (ci, &idx) in chunk.iter().enumerate() {
-                            let entry = &self.library.books[idx];
-                            let title = entry.title.clone();
-                            let path = entry.path.clone();
-                            let chapter = entry.last_chapter;
-                            let palette = &COVER_PALETTE;
-                            let hash = title
-                                .bytes()
-                                .fold(0u32, |acc, b| acc.wrapping_add(b as u32));
-                            let cover_color = palette[(hash as usize) % palette.len()];
-                            let card_id = ui.id().with(("card", idx));
-                            let (card_rect, card_response) = ui.allocate_exact_size(
-                                Vec2::new(card_width, card_height),
-                                egui::Sense::click(),
-                            );
-                            let hovered = card_response.hovered();
-                            let bg = if hovered { card_hover_bg } else { card_bg };
-                            ui.painter()
-                                .rect_filled(card_rect, CornerRadius::same(10), bg);
-                            ui.painter().rect_stroke(
-                                card_rect,
-                                CornerRadius::same(10),
-                                Stroke::new(
-                                    1.0_f32,
-                                    if hovered {
-                                        accent.linear_multiply(0.5)
-                                    } else {
-                                        border_color
-                                    },
-                                ),
-                                StrokeKind::Outside,
-                            );
-                            let cover_rect = egui::Rect::from_min_max(
-                                egui::pos2(card_rect.left() + 10.0, card_rect.top() + 8.0),
-                                egui::pos2(
-                                    card_rect.left() + 10.0 + cover_w,
-                                    card_rect.bottom() - 8.0,
-                                ),
-                            );
-                            let cover_rounding = CornerRadius::same(8);
-                            let cover_texture =
-                                self.cover_textures.get(&path).and_then(|t| t.as_ref());
-                            if let Some(tex) = cover_texture {
-                                ui.painter().rect_filled(
-                                    cover_rect,
-                                    cover_rounding,
-                                    Color32::from_gray(30),
-                                );
-                                let tex_size = tex.size_vec2();
-                                let scale = (cover_rect.width() / tex_size.x)
-                                    .max(cover_rect.height() / tex_size.y);
-                                let img_size = tex_size * scale;
-                                let img_rect =
-                                    egui::Rect::from_center_size(cover_rect.center(), img_size);
-                                let clipped = ui.painter().with_clip_rect(cover_rect);
-                                clipped.image(
-                                    tex.id(),
-                                    img_rect,
-                                    egui::Rect::from_min_max(
-                                        egui::pos2(0.0, 0.0),
-                                        egui::pos2(1.0, 1.0),
-                                    ),
-                                    Color32::WHITE,
-                                );
-                            } else {
-                                ui.painter()
-                                    .rect_filled(cover_rect, cover_rounding, cover_color);
-                                let first_char = title.chars().next().unwrap_or('📖').to_string();
-                                ui.painter().text(
-                                    cover_rect.center(),
-                                    egui::Align2::CENTER_CENTER,
-                                    &first_char,
-                                    egui::FontId::proportional(36.0),
-                                    Color32::WHITE,
-                                );
-                            }
-                            let content_rect = egui::Rect::from_min_max(
-                                egui::pos2(cover_rect.right() + 12.0, card_rect.top() + 14.0),
-                                egui::pos2(card_rect.right() - 12.0, card_rect.bottom() - 14.0),
-                            );
-                            let mut child = ui.new_child(
-                                egui::UiBuilder::new()
-                                    .id_salt(card_id)
-                                    .max_rect(content_rect)
-                                    .layout(egui::Layout::top_down(egui::Align::LEFT)),
-                            );
-                            // Clip the child painter to content_rect so widgets never
-                            // paint outside the card border.
-                            let parent_clip = ui.clip_rect();
-                            child.set_clip_rect(parent_clip.intersect(content_rect));
-                            child.add_space(4.0);
-                            // Use egui's built-in single-line truncation so CJK titles
-                            // never wrap regardless of card width.
-                            child.add(
-                                egui::Label::new(
-                                    egui::RichText::new(&title)
-                                        .size(15.0)
-                                        .strong()
-                                        .color(heading_color),
-                                )
-                                .truncate(),
-                            );
-                            child.add_space(6.0);
-                            child.add(
-                                egui::Label::new(
-                                    egui::RichText::new(
-                                        self.i18n.tf1(
-                                            "library.last_read_chapter",
-                                            entry
-                                                .last_chapter_title
-                                                .as_deref()
-                                                .unwrap_or(&format!("{}", chapter + 1)),
-                                        ),
-                                    )
-                                    .size(12.0)
-                                    .color(subtitle_color),
-                                )
-                                .truncate(),
-                            );
-                            child.add_space(8.0);
-                            let read_btn = egui::Button::new(
-                                egui::RichText::new(self.i18n.t("library.continue_reading"))
-                                    .size(12.5)
-                                    .color(Color32::WHITE),
+                        ui.add_space(32.0);
+                        ui.label(
+                            egui::RichText::new(
+                                self.i18n
+                                    .tf1("library.book_count", &sorted.len().to_string()),
                             )
-                            .fill(accent)
-                            .stroke(Stroke::NONE)
-                            .corner_radius(CornerRadius::same(5))
-                            .min_size(Vec2::new(0.0, 26.0));
-                            if child.add(read_btn).clicked() {
-                                action_open_path = Some((path.clone(), chapter));
-                            }
-                            child.add_space(4.0);
-                            child.horizontal(|ui| {
-                                ui.spacing_mut().item_spacing.x = 4.0;
-                                let export_btn = egui::Button::new(
-                                    egui::RichText::new("↗").size(12.0).color(subtitle_color),
-                                )
-                                .fill(Color32::TRANSPARENT)
-                                .stroke(Stroke::new(1.0_f32, border_color))
-                                .corner_radius(CornerRadius::same(5))
-                                .min_size(Vec2::new(24.0, 26.0));
-                                if ui
-                                    .add(export_btn)
-                                    .on_hover_text(self.i18n.t("toolbar.export"))
-                                    .clicked()
-                                {
-                                    action_export_path = Some(path.clone());
-                                }
-                                let del_btn = egui::Button::new(
-                                    egui::RichText::new("🗑").size(12.0).color(subtitle_color),
-                                )
-                                .fill(Color32::TRANSPARENT)
-                                .stroke(Stroke::new(1.0_f32, border_color))
-                                .corner_radius(CornerRadius::same(5))
-                                .min_size(Vec2::new(24.0, 26.0));
-                                if ui.add(del_btn).clicked() {
-                                    action_remove_path = Some(path.clone());
-                                }
-                            });
-                            if card_response.clicked() {
-                                action_open_path = Some((path.clone(), chapter));
-                            }
-                            // Add gap between cards, not after the last one
-                            if ci < chunk.len() - 1 {
-                                ui.add_space(gap);
-                            }
-                        }
+                            .size(13.0)
+                            .color(subtitle_color),
+                        );
+                        ui.add_space(10.0);
+                        ui.label(
+                            egui::RichText::new(self.i18n.t("library.tip"))
+                                .size(12.5)
+                                .color(subtitle_color),
+                        );
                     });
-                    ui.add_space(gap);
-                }
-                ui.add_space(32.0);
-            });
+                    ui.add_space(12.0);
+                    // Match the 32px horizontal padding used by the header so the
+                    // last card always has a visible right margin.
+                    let padding = LIBRARY_GRID_PADDING;
+                    let gap = LIBRARY_GRID_GAP;
+                    // Keep every book card at a fixed width. Only the number of columns changes
+                    // with the window size, so cards don't stretch/shrink when resizing the window.
+                    let card_width = LIBRARY_CARD_WIDTH;
+                    let cols = library_grid_columns(ui.available_width());
+                    // Fixed card height keeps rows uniform regardless of text wrapping.
+                    let card_height = LIBRARY_CARD_HEIGHT;
+                    let cover_w = LIBRARY_COVER_WIDTH;
+                    let chunks: Vec<Vec<usize>> = sorted.chunks(cols).map(|c| c.to_vec()).collect();
+                    let leading_pad = padding;
+                    for chunk in &chunks {
+                        ui.horizontal(|ui| {
+                            ui.add_space(leading_pad);
+                            for (ci, &idx) in chunk.iter().enumerate() {
+                                let entry = &self.library.books[idx];
+                                let title = entry.title.clone();
+                                let path = entry.path.clone();
+                                let chapter = entry.last_chapter;
+                                let palette = &COVER_PALETTE;
+                                let hash = title
+                                    .bytes()
+                                    .fold(0u32, |acc, b| acc.wrapping_add(b as u32));
+                                let cover_color = palette[(hash as usize) % palette.len()];
+                                let card_id = ui.id().with(("card", idx));
+                                let (card_rect, card_response) = ui.allocate_exact_size(
+                                    Vec2::new(card_width, card_height),
+                                    egui::Sense::click(),
+                                );
+                                let hovered = card_response.hovered();
+                                let bg = if hovered { card_hover_bg } else { card_bg };
+                                ui.painter()
+                                    .rect_filled(card_rect, CornerRadius::same(10), bg);
+                                ui.painter().rect_stroke(
+                                    card_rect,
+                                    CornerRadius::same(10),
+                                    Stroke::new(
+                                        1.0_f32,
+                                        if hovered {
+                                            accent.linear_multiply(0.5)
+                                        } else {
+                                            border_color
+                                        },
+                                    ),
+                                    StrokeKind::Outside,
+                                );
+                                let cover_rect = egui::Rect::from_min_max(
+                                    egui::pos2(card_rect.left() + 10.0, card_rect.top() + 8.0),
+                                    egui::pos2(
+                                        card_rect.left() + 10.0 + cover_w,
+                                        card_rect.bottom() - 8.0,
+                                    ),
+                                );
+                                let cover_rounding = CornerRadius::same(8);
+                                let cover_texture =
+                                    self.cover_textures.get(&path).and_then(|t| t.as_ref());
+                                if let Some(tex) = cover_texture {
+                                    ui.painter().rect_filled(
+                                        cover_rect,
+                                        cover_rounding,
+                                        Color32::from_gray(30),
+                                    );
+                                    let tex_size = tex.size_vec2();
+                                    let scale = (cover_rect.width() / tex_size.x)
+                                        .max(cover_rect.height() / tex_size.y);
+                                    let img_size = tex_size * scale;
+                                    let img_rect =
+                                        egui::Rect::from_center_size(cover_rect.center(), img_size);
+                                    let clipped = ui.painter().with_clip_rect(cover_rect);
+                                    clipped.image(
+                                        tex.id(),
+                                        img_rect,
+                                        egui::Rect::from_min_max(
+                                            egui::pos2(0.0, 0.0),
+                                            egui::pos2(1.0, 1.0),
+                                        ),
+                                        Color32::WHITE,
+                                    );
+                                } else {
+                                    ui.painter().rect_filled(
+                                        cover_rect,
+                                        cover_rounding,
+                                        cover_color,
+                                    );
+                                    let first_char =
+                                        title.chars().next().unwrap_or('📖').to_string();
+                                    ui.painter().text(
+                                        cover_rect.center(),
+                                        egui::Align2::CENTER_CENTER,
+                                        &first_char,
+                                        egui::FontId::proportional(36.0),
+                                        Color32::WHITE,
+                                    );
+                                }
+                                let content_rect = egui::Rect::from_min_max(
+                                    egui::pos2(cover_rect.right() + 12.0, card_rect.top() + 14.0),
+                                    egui::pos2(card_rect.right() - 12.0, card_rect.bottom() - 14.0),
+                                );
+                                let mut child = ui.new_child(
+                                    egui::UiBuilder::new()
+                                        .id_salt(card_id)
+                                        .max_rect(content_rect)
+                                        .layout(egui::Layout::top_down(egui::Align::LEFT)),
+                                );
+                                // Clip the child painter to content_rect so widgets never
+                                // paint outside the card border.
+                                let parent_clip = ui.clip_rect();
+                                child.set_clip_rect(parent_clip.intersect(content_rect));
+                                child.add_space(4.0);
+                                // Use egui's built-in single-line truncation so CJK titles
+                                // never wrap regardless of card width.
+                                child.add(
+                                    egui::Label::new(
+                                        egui::RichText::new(&title)
+                                            .size(15.0)
+                                            .strong()
+                                            .color(heading_color),
+                                    )
+                                    .truncate(),
+                                );
+                                child.add_space(6.0);
+                                child.add(
+                                    egui::Label::new(
+                                        egui::RichText::new(
+                                            self.i18n.tf1(
+                                                "library.last_read_chapter",
+                                                entry
+                                                    .last_chapter_title
+                                                    .as_deref()
+                                                    .unwrap_or(&format!("{}", chapter + 1)),
+                                            ),
+                                        )
+                                        .size(12.0)
+                                        .color(subtitle_color),
+                                    )
+                                    .truncate(),
+                                );
+                                child.add_space(8.0);
+                                let read_btn = egui::Button::new(
+                                    egui::RichText::new(self.i18n.t("library.continue_reading"))
+                                        .size(12.5)
+                                        .color(Color32::WHITE),
+                                )
+                                .fill(accent)
+                                .stroke(Stroke::NONE)
+                                .corner_radius(CornerRadius::same(5))
+                                .min_size(Vec2::new(0.0, 26.0));
+                                if child.add(read_btn).clicked() {
+                                    action_open_path = Some((path.clone(), chapter));
+                                }
+                                child.add_space(4.0);
+                                child.horizontal(|ui| {
+                                    ui.spacing_mut().item_spacing.x = 4.0;
+                                    let export_btn = egui::Button::new(
+                                        egui::RichText::new("↗").size(12.0).color(subtitle_color),
+                                    )
+                                    .fill(Color32::TRANSPARENT)
+                                    .stroke(Stroke::new(1.0_f32, border_color))
+                                    .corner_radius(CornerRadius::same(5))
+                                    .min_size(Vec2::new(24.0, 26.0));
+                                    if ui
+                                        .add(export_btn)
+                                        .on_hover_text(self.i18n.t("toolbar.export"))
+                                        .clicked()
+                                    {
+                                        action_export_path = Some(path.clone());
+                                    }
+                                    let del_btn = egui::Button::new(
+                                        egui::RichText::new("🗑").size(12.0).color(subtitle_color),
+                                    )
+                                    .fill(Color32::TRANSPARENT)
+                                    .stroke(Stroke::new(1.0_f32, border_color))
+                                    .corner_radius(CornerRadius::same(5))
+                                    .min_size(Vec2::new(24.0, 26.0));
+                                    if ui.add(del_btn).clicked() {
+                                        action_remove_path = Some(path.clone());
+                                    }
+                                });
+                                if card_response.clicked() {
+                                    action_open_path = Some((path.clone(), chapter));
+                                }
+                                // Add gap between cards, not after the last one
+                                if ci < chunk.len() - 1 {
+                                    ui.add_space(gap);
+                                }
+                            }
+                        });
+                        ui.add_space(gap);
+                    }
+                    ui.add_space(32.0);
+                });
         }
 
         if action_open_dialog {
