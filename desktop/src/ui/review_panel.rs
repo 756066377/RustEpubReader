@@ -358,7 +358,7 @@ impl ReaderApp {
                             if !show_all {
                                 let mut result = Vec::new();
                                 let mut in_group = false;
-                                for block in &chapter.blocks {
+                                for block in chapter.blocks.iter() {
                                     match block {
                                         reader_core::epub::ContentBlock::Heading {
                                             anchor_id,
