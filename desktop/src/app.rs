@@ -1069,6 +1069,7 @@ pub struct ReaderApp {
     pub txt_import: Option<TxtImportState>,
     pub book_open: Option<BookOpenJob>,
     pub chapter_load: Option<ChapterLoadJob>,
+    pub(crate) queued_chapter_loads: Vec<usize>,
     pub(crate) pending_search_query: Option<String>,
     // ── Typography ──
     pub line_spacing: f32,
@@ -1243,6 +1244,7 @@ pub type ChapterLoadSlot =
     Arc<Mutex<Option<Result<Vec<(usize, Vec<reader_core::epub::ContentBlock>)>, String>>>>;
 
 pub struct ChapterLoadJob {
+    pub indices: Vec<usize>,
     pub wanted: Arc<Mutex<HashSet<usize>>>,
     pub slot: ChapterLoadSlot,
 }
@@ -1403,6 +1405,7 @@ impl Default for ReaderApp {
             txt_import: None,
             book_open: None,
             chapter_load: None,
+            queued_chapter_loads: Vec::new(),
             pending_search_query: None,
             // Typography
             line_spacing: default_line_spacing(),
@@ -1797,32 +1800,47 @@ impl ReaderApp {
                     .is_some_and(|chapter| !chapter.loaded && chapter.source_href.is_some())
             })
             .collect();
+        if needed.is_empty() {
+            return;
+        }
         if let Some(job) = &self.chapter_load {
-            // Keep one EPUB parser worker alive at a time. Rapid TOC clicks and
-            // full-book search only replace its wanted set, so they cannot spawn
-            // a pile of concurrent File::open calls.
-            if let Ok(mut wanted) = job.wanted.lock() {
-                wanted.clear();
-                wanted.extend(needed.iter().copied());
+            let priority_target = self
+                .pending_scroll_chapter
+                .filter(|target| needed.contains(target));
+            let can_reuse = priority_target.map_or_else(
+                || needed.iter().all(|idx| job.indices.contains(idx)),
+                |target| job.indices.as_slice() == [target],
+            );
+            if can_reuse {
+                if let Ok(mut wanted) = job.wanted.lock() {
+                    wanted.clear();
+                    wanted.extend(needed.iter().copied());
+                }
+            } else {
+                // The active worker may already have scanned past the new TOC
+                // target. Stop it at the next chapter boundary and queue an
+                // explicit follow-up batch instead of spawning concurrently.
+                if let Ok(mut wanted) = job.wanted.lock() {
+                    wanted.clear();
+                }
+                self.queued_chapter_loads = needed;
             }
             return;
         }
 
-        if needed.is_empty() {
-            return;
-        }
         let Some(epub_path) = book.source_path.clone() else {
             return;
         };
         let image_paths = book.image_resource_paths().to_vec();
-        // Keep every chapter in the worker's scan list. The wanted set is
-        // mutable, allowing a later TOC click to retarget the same worker even
-        // when the new chapter was not part of the original prefetch batch.
-        let jobs: Vec<(usize, String)> = book
-            .chapters
+        let jobs: Vec<(usize, String)> = needed
             .iter()
-            .enumerate()
-            .filter_map(|(idx, chapter)| chapter.source_href.clone().map(|href| (idx, href)))
+            .copied()
+            .filter_map(|idx| {
+                book.chapters
+                    .get(idx)
+                    .and_then(|chapter| chapter.source_href.clone())
+                    .map(|href| (idx, href))
+            })
             .collect();
         if jobs.is_empty() {
             return;
@@ -1831,7 +1849,11 @@ impl ReaderApp {
         let slot: ChapterLoadSlot = Arc::new(Mutex::new(None));
         let slot_clone = slot.clone();
         let wanted_clone = wanted.clone();
-        self.chapter_load = Some(ChapterLoadJob { wanted, slot });
+        self.chapter_load = Some(ChapterLoadJob {
+            indices: needed,
+            wanted,
+            slot,
+        });
         std::thread::spawn(move || {
             let result =
                 EpubBook::parse_chapters_from_file_while(&epub_path, &jobs, &image_paths, |idx| {
@@ -1855,6 +1877,7 @@ impl ReaderApp {
         }
         if let Some(result) = finished {
             self.chapter_load = None;
+            let mut next_load = std::mem::take(&mut self.queued_chapter_loads);
             match result {
                 Ok(chapters) => {
                     let searching = self.pending_search_query.is_some();
@@ -1902,7 +1925,11 @@ impl ReaderApp {
                             }
                             self.pending_search_query = None;
                         } else {
-                            self.request_chapter_loads(&unloaded);
+                            for idx in unloaded {
+                                if !next_load.contains(&idx) {
+                                    next_load.push(idx);
+                                }
+                            }
                         }
                     }
                     self.push_feedback_log("[Book] chapter batch loaded".to_string());
@@ -1911,6 +1938,9 @@ impl ReaderApp {
                     self.push_feedback_log(format!("[Book] chapter load error: {e}"));
                     self.error_msg = Some(e);
                 }
+            }
+            if !next_load.is_empty() {
+                self.request_chapter_loads(&next_load);
             }
         }
         if self.chapter_load.is_some() {
