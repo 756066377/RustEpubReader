@@ -52,37 +52,45 @@ impl ReaderApp {
                     let is_current = entry.chapter_index == current_chapter;
                     let ch_bookmarked = bookmarked.contains(&entry.chapter_index);
 
-                    ui.horizontal(|ui| {
-                        let text = egui::RichText::new(&entry.title).size(14.0);
-                        let label = ui.selectable_label(is_current, text);
-                        if label.clicked() && entry.chapter_index != current_chapter {
-                            clicked_chapter = Some(entry.chapter_index);
-                        }
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(ui.available_width(), ROW_HEIGHT),
+                        egui::Layout::left_to_right(egui::Align::Center),
+                        |ui| {
+                            let text = egui::RichText::new(&entry.title).size(14.0);
+                            let label_width = (ui.available_width() - 28.0).max(1.0);
+                            let label = ui.add_sized(
+                                [label_width, ROW_HEIGHT],
+                                egui::SelectableLabel::new(is_current, text),
+                            );
+                            if label.clicked() && entry.chapter_index != current_chapter {
+                                clicked_chapter = Some(entry.chapter_index);
+                            }
 
-                        let bm_icon = if ch_bookmarked { "★" } else { "☆" };
-                        let bm_color = if ch_bookmarked {
-                            egui::Color32::from_rgb(255, 200, 0)
-                        } else {
-                            egui::Color32::GRAY
-                        };
-                        let chapter_idx = entry.chapter_index;
-                        if ui
-                            .add(
-                                egui::Button::new(
-                                    egui::RichText::new(bm_icon).size(14.0).color(bm_color),
-                                )
-                                .frame(false),
-                            )
-                            .on_hover_text(if ch_bookmarked {
-                                "取消书签"
+                            let bm_icon = if ch_bookmarked { "★" } else { "☆" };
+                            let bm_color = if ch_bookmarked {
+                                egui::Color32::from_rgb(255, 200, 0)
                             } else {
-                                "添加书签"
-                            })
-                            .clicked()
-                        {
-                            bookmark_toggle = Some((chapter_idx, ch_bookmarked));
-                        }
-                    });
+                                egui::Color32::GRAY
+                            };
+                            let chapter_idx = entry.chapter_index;
+                            if ui
+                                .add(
+                                    egui::Button::new(
+                                        egui::RichText::new(bm_icon).size(14.0).color(bm_color),
+                                    )
+                                    .frame(false),
+                                )
+                                .on_hover_text(if ch_bookmarked {
+                                    "取消书签"
+                                } else {
+                                    "添加书签"
+                                })
+                                .clicked()
+                            {
+                                bookmark_toggle = Some((chapter_idx, ch_bookmarked));
+                            }
+                        },
+                    );
                 }
             });
         }
