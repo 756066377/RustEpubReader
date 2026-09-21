@@ -254,6 +254,7 @@ impl ReaderApp {
                     // belong to the previous chapter in the continuous window.
                     self.continuous_scroll.reset(self.current_chapter, total_ch);
                     self.pending_restore_block = Some(self.current_block);
+                    self.layout_reanchor_pending = true;
                     self.scroll_to_top = false;
                 }
                 if self
@@ -335,6 +336,7 @@ impl ReaderApp {
                     let scroll_delta_y = ui.input(|i| i.raw_scroll_delta.y);
                     // A user scroll explicitly takes over from startup position restore.
                     self.pending_restore_block = None;
+                    self.layout_reanchor_pending = false;
                     self.continuous_scroll
                         .allow_prepend_after_user_scroll(scroll_delta_y);
                     self.tts_detach_view();
@@ -443,12 +445,13 @@ impl ReaderApp {
                     }
                 });
                 let viewport = scroll_output.inner_rect;
+                let suppress_visible_sync = self.layout_reanchor_pending;
                 self.continuous_scroll.record_scroll_output(
                     scroll_output.state.offset.y,
                     scroll_output.content_size.y,
                     viewport.height(),
                 );
-                if self.pending_restore_block.is_none() {
+                if self.pending_restore_block.is_none() && !suppress_visible_sync {
                     let reading_y = viewport.top() + (viewport.height() * 0.2).min(120.0);
                     let visible_chapter = chapter_rects
                         .iter()
@@ -478,6 +481,10 @@ impl ReaderApp {
                         self.continuous_scroll.set_visible_chapter(chapter);
                         self.schedule_position_save(chapter, block);
                     }
+                }
+                if suppress_visible_sync && self.pending_restore_block.is_none() {
+                    self.layout_reanchor_pending = false;
+                    ui.ctx().request_repaint();
                 }
                 let near_start = self.continuous_scroll.near_start();
                 let near_end = self.continuous_scroll.near_end();

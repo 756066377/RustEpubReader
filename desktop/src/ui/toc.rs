@@ -122,6 +122,7 @@ impl ReaderApp {
             self.current_chapter = chapter_idx;
             self.current_block = 0;
             self.pending_restore_block = None;
+            self.layout_reanchor_pending = false;
             if self.scroll_mode {
                 self.pending_scroll_chapter = Some(chapter_idx);
                 self.continuous_scroll
