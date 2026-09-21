@@ -82,20 +82,20 @@ jobs:
           tag_name: ${{ github.ref_name }}
           name: RustEpubReader ${{ github.ref_name }}
           body: |
-            ## v1.0.17
+            ## v1.0.18
 
             Windows 64 位隐蔽阅读发行版。
 
             ### 修复
-            - 修复按需加载模式下通过目录跳转偶尔不生效的问题。
-            - 目录跳转明确优先于普通滚动和章节预取。
-            - 目标章节挂载后再执行滚动定位，避免跳到其他章节。
+            - 修复跳转到未加载章节时长时间停留在“正在加载章节”的问题。
+            - 目录跳转会立即取消旧的预取任务并优先加载目标章节。
+            - 增加章节加载调度回归测试，避免异步任务竞态再次导致加载卡住。
 
             ### 说明
-            - 基于 v1.0.16。
+            - 基于 v1.0.17。
             - CI 发行版构建仍只生成 Windows 桌面端产物。
 
             ### 下载
-            - `RustEpubReader-Win64-v1.0.17.exe`
+            - `RustEpubReader-Win64-v1.0.18.exe`
           files: |
             release-artifacts/RustEpubReader-Win64-*.exe

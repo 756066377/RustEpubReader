@@ -1249,6 +1249,50 @@ pub struct ChapterLoadJob {
     pub slot: ChapterLoadSlot,
 }
 
+fn should_replace_chapter_load(
+    active: &[usize],
+    needed: &[usize],
+    priority_target: Option<usize>,
+    searching: bool,
+) -> bool {
+    if searching {
+        return false;
+    }
+    priority_target
+        .filter(|target| needed.contains(target))
+        .map_or_else(
+            || needed.iter().any(|idx| !active.contains(idx)),
+            |target| active != [target],
+        )
+}
+
+#[cfg(test)]
+mod chapter_load_tests {
+    use super::should_replace_chapter_load;
+
+    #[test]
+    fn priority_target_replaces_prefetch_batch() {
+        assert!(should_replace_chapter_load(&[2, 3], &[8], Some(8), false));
+    }
+
+    #[test]
+    fn priority_target_reuses_only_matching_single_target_job() {
+        assert!(!should_replace_chapter_load(&[8], &[8], Some(8), false));
+        assert!(should_replace_chapter_load(&[8, 9], &[8], Some(8), false));
+    }
+
+    #[test]
+    fn ordinary_prefetch_reuses_job_when_all_chapters_are_present() {
+        assert!(!should_replace_chapter_load(&[2, 3], &[2], None, false));
+        assert!(should_replace_chapter_load(&[2], &[3], None, false));
+    }
+
+    #[test]
+    fn search_loads_are_not_replaced() {
+        assert!(!should_replace_chapter_load(&[2], &[9], Some(9), true));
+    }
+}
+
 /// TXT 导入对话框状态。
 pub struct TxtImportState {
     pub txt_path: PathBuf,
@@ -1802,14 +1846,25 @@ impl ReaderApp {
         let searching = self.pending_search_query.is_some() || self.show_search;
 
         if let Some(job) = &self.chapter_load {
-            if let Ok(mut wanted) = job.wanted.lock() {
-                wanted.clear();
-                wanted.extend(needed.iter().copied());
-            }
-            if !searching && needed.iter().all(|idx| !job.indices.contains(idx)) {
+            // A TOC jump must not wait behind an old prefetch batch. Cancel the
+            // obsolete worker and start a new one immediately; the old worker
+            // owns its Arcs and will safely discard its result when it exits.
+            let should_replace_job = should_replace_chapter_load(
+                &job.indices,
+                &needed,
+                self.pending_scroll_chapter,
+                searching,
+            );
+            if should_replace_job {
                 job.cancel.store(true, Ordering::Relaxed);
+                self.chapter_load = None;
+            } else {
+                if let Ok(mut wanted) = job.wanted.lock() {
+                    wanted.clear();
+                    wanted.extend(needed.iter().copied());
+                }
+                return;
             }
-            return;
         }
 
         if needed.is_empty() {
