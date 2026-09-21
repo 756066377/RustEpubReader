@@ -319,6 +319,7 @@ impl ReaderApp {
                     })
                     .unwrap_or_default();
                 let mut target_chapter_rect = None;
+                let mut chapter_rects = Vec::new();
                 let empty_highlights: HashMap<
                     usize,
                     Vec<(usize, usize, reader_core::library::HighlightColor)>,
@@ -397,6 +398,13 @@ impl ReaderApp {
                             chapter_ranges,
                         );
                         let chapter_height = (ui.cursor().top() - chapter_top).max(0.0);
+                        chapter_rects.push((
+                            chapter_idx,
+                            egui::Rect::from_min_max(
+                                egui::pos2(ui.clip_rect().left(), chapter_top),
+                                egui::pos2(ui.clip_rect().right(), ui.cursor().top()),
+                            ),
+                        ));
                         if self.pending_scroll_chapter == Some(chapter_idx) {
                             target_chapter_rect = Some(egui::Rect::from_min_max(
                                 egui::pos2(ui.clip_rect().left(), chapter_top),
@@ -435,16 +443,33 @@ impl ReaderApp {
                     scroll_output.content_size.y,
                     viewport.height(),
                 );
-                let visible_block = BLOCK_GALLEYS.with(|galleys| {
-                    galleys
-                        .borrow()
-                        .iter()
-                        .filter(|entry| entry.rect.intersects(viewport))
-                        .min_by(|a, b| a.rect.top().total_cmp(&b.rect.top()))
-                        .map(|entry| (entry.key.chapter, entry.key.block))
-                });
                 if self.pending_restore_block.is_none() {
-                    if let Some((chapter, block)) = visible_block {
+                    let reading_y = viewport.top() + (viewport.height() * 0.2).min(120.0);
+                    let visible_chapter = chapter_rects
+                        .iter()
+                        .find(|(_, rect)| rect.top() <= reading_y && reading_y < rect.bottom())
+                        .or_else(|| {
+                            chapter_rects
+                                .iter()
+                                .filter(|(_, rect)| rect.intersects(viewport))
+                                .max_by(|a, b| {
+                                    a.1.intersect(viewport)
+                                        .height()
+                                        .total_cmp(&b.1.intersect(viewport).height())
+                                })
+                        })
+                        .map(|(chapter, _)| *chapter);
+                    if let Some(chapter) = visible_chapter {
+                        let block = BLOCK_GALLEYS.with(|galleys| {
+                            galleys
+                                .borrow()
+                                .iter()
+                                .filter(|entry| {
+                                    entry.key.chapter == chapter && entry.rect.intersects(viewport)
+                                })
+                                .min_by(|a, b| a.rect.top().total_cmp(&b.rect.top()))
+                                .map_or(0, |entry| entry.key.block)
+                        });
                         self.continuous_scroll.set_visible_chapter(chapter);
                         self.schedule_position_save(chapter, block);
                     }

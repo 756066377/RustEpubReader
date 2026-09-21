@@ -1033,6 +1033,7 @@ pub struct ReaderApp {
     pub i18n: I18n,
     pub previous_chapter: Option<usize>,
     pub scroll_toc_to_current: bool,
+    pub(crate) last_toc_chapter: Option<usize>,
     // ── Sharing ──
     pub auto_start_sharing: bool,
     pub peer_store: Arc<Mutex<PeerStore>>,
@@ -1375,6 +1376,7 @@ impl Default for ReaderApp {
             i18n: I18n::default(),
             previous_chapter: None,
             scroll_toc_to_current: false,
+            last_toc_chapter: None,
             // Sharing
             auto_start_sharing: false,
             peer_store: Arc::new(Mutex::new(peer_store)),

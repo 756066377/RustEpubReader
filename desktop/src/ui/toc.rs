@@ -34,17 +34,24 @@ impl ReaderApp {
                 .map(|cfg| cfg.bookmarks.iter().map(|b| b.chapter).collect())
                 .unwrap_or_default();
             let current_chapter = self.current_chapter;
-            let should_scroll = self.scroll_toc_to_current;
+            let should_scroll =
+                self.scroll_toc_to_current || self.last_toc_chapter != Some(current_chapter);
             self.scroll_toc_to_current = false;
+            self.last_toc_chapter = Some(current_chapter);
             const ROW_HEIGHT: f32 = 24.0;
-            let mut scroll_area = egui::ScrollArea::vertical().id_salt("toc_scroll");
+            const SCROLLBAR_GUTTER: f32 = 18.0;
+            let viewport_height = ui.available_height();
+            let mut scroll_area = egui::ScrollArea::vertical()
+                .id_salt("toc_scroll")
+                .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible);
             if should_scroll {
                 if let Some(row) = toc
                     .iter()
                     .position(|entry| entry.chapter_index == current_chapter)
                 {
-                    scroll_area = scroll_area
-                        .vertical_scroll_offset((row as f32 * ROW_HEIGHT - 120.0).max(0.0));
+                    let centered =
+                        row as f32 * ROW_HEIGHT - (viewport_height - ROW_HEIGHT).max(0.0) * 0.5;
+                    scroll_area = scroll_area.vertical_scroll_offset(centered.max(0.0));
                 }
             }
             scroll_area.show_rows(ui, ROW_HEIGHT, toc.len(), |ui, visible_rows| {
@@ -57,7 +64,8 @@ impl ReaderApp {
                         egui::Layout::left_to_right(egui::Align::Center),
                         |ui| {
                             let text = egui::RichText::new(&entry.title).size(14.0);
-                            let label_width = (ui.available_width() - 28.0).max(1.0);
+                            let label_width =
+                                (ui.available_width() - 28.0 - SCROLLBAR_GUTTER).max(1.0);
                             let label = ui.add_sized(
                                 [label_width, ROW_HEIGHT],
                                 egui::SelectableLabel::new(is_current, text),
@@ -89,6 +97,7 @@ impl ReaderApp {
                             {
                                 bookmark_toggle = Some((chapter_idx, ch_bookmarked));
                             }
+                            ui.add_space(SCROLLBAR_GUTTER);
                         },
                     );
                 }
