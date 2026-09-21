@@ -1027,6 +1027,7 @@ pub struct ReaderApp {
     pub(crate) system_font_paths: HashMap<String, String>,
     font_discovery_result: FontDiscoveryResult,
     last_saved_settings: Option<AppSettings>,
+    pending_settings_save: Option<(AppSettings, std::time::Instant)>,
     pub font_search: String,
     pub cjk_font_search: String,
     pub i18n: I18n,
@@ -1368,6 +1369,7 @@ impl Default for ReaderApp {
             system_font_paths: HashMap::new(),
             font_discovery_result,
             last_saved_settings: None,
+            pending_settings_save: None,
             font_search: String::new(),
             cjk_font_search: String::new(),
             i18n: I18n::default(),
@@ -1960,7 +1962,7 @@ impl ReaderApp {
         let current = self.current_chapter;
         for (idx, chapter) in book.chapters.iter_mut().enumerate() {
             if chapter.loaded && idx != current && (idx < start || idx >= end) {
-                chapter.blocks.clear();
+                chapter.blocks = Arc::new(Vec::new());
                 chapter.loaded = false;
             }
         }
@@ -2232,7 +2234,7 @@ impl ReaderApp {
             if let Some(ch) = book.chapters.get(self.current_chapter) {
                 self.page_anim_cross_chapter_snapshot = Some(CrossChapterSnapshot {
                     chapter: self.current_chapter,
-                    blocks: Arc::new(ch.blocks.clone()),
+                    blocks: Arc::clone(&ch.blocks),
                     block_ranges: self.page_block_ranges.clone(),
                     total_pages: self.total_pages,
                     from_page: self.current_page,
@@ -2791,6 +2793,9 @@ impl ReaderApp {
 
 impl Drop for ReaderApp {
     fn drop(&mut self) {
+        if let Some((settings, _)) = self.pending_settings_save.take() {
+            settings.save(&self.data_dir);
+        }
         self.stop_boss_hotkey_runtime();
     }
 }
@@ -3378,7 +3383,6 @@ impl eframe::App for ReaderApp {
                             .fill(ctx.style().visuals.window_fill()),
                     )
                     .show(ctx, |ui| {
-                        Self::handle_window_drag_zone(ui, "toc_drag_zone");
                         self.render_toc(ui);
                     });
             }
@@ -3443,8 +3447,26 @@ impl eframe::App for ReaderApp {
         self.sync_root_viewport_geometry(ctx);
         let settings = AppSettings::from_app(self);
         if self.last_saved_settings.as_ref() != Some(&settings) {
-            settings.save(&self.data_dir);
-            self.last_saved_settings = Some(settings);
+            let now = std::time::Instant::now();
+            let changed_again = self
+                .pending_settings_save
+                .as_ref()
+                .map_or(true, |(pending, _)| pending != &settings);
+            if changed_again {
+                self.pending_settings_save =
+                    Some((settings, now + std::time::Duration::from_millis(400)));
+            }
+            if let Some((pending, due)) = &self.pending_settings_save {
+                if now >= *due {
+                    pending.save(&self.data_dir);
+                    self.last_saved_settings = Some(pending.clone());
+                    self.pending_settings_save = None;
+                } else {
+                    ctx.request_repaint_after(*due - now);
+                }
+            }
+        } else {
+            self.pending_settings_save = None;
         }
     }
 }

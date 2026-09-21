@@ -64,7 +64,7 @@ pub enum ContentBlock {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Chapter {
     pub title: String,
-    pub blocks: Vec<ContentBlock>,
+    pub blocks: Arc<Vec<ContentBlock>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_href: Option<String>,
     /// False until this chapter's XHTML has been parsed into `blocks`.

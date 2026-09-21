@@ -4,6 +4,7 @@ mod image;
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use rbook::ebook::resource::ResourceKey;
 use rbook::epub::Epub as RbookEpub;
@@ -243,7 +244,7 @@ impl EpubBook {
                 .any(|(_, p)| resource_path_matches(&path_str, p));
             chapters.push(Chapter {
                 title: chapter_title.clone(),
-                blocks: Vec::new(),
+                blocks: Arc::new(Vec::new()),
                 source_href: Some(path_str),
                 loaded: false,
             });
@@ -319,7 +320,7 @@ impl EpubBook {
         let loaded = Self::parse_chapters_from_file(&path, &jobs, &self.image_resource_paths)?;
         for (idx, blocks) in loaded {
             if let Some(chapter) = self.chapters.get_mut(idx) {
-                chapter.blocks = blocks;
+                chapter.blocks = Arc::new(blocks);
                 chapter.loaded = true;
             }
         }
@@ -357,14 +358,14 @@ impl EpubBook {
 
     pub fn apply_loaded_chapter(&mut self, idx: usize, blocks: Vec<crate::epub::ContentBlock>) {
         if let Some(chapter) = self.chapters.get_mut(idx) {
-            chapter.blocks = blocks;
+            chapter.blocks = Arc::new(blocks);
             chapter.loaded = true;
         }
     }
 
     pub fn unload_chapter(&mut self, idx: usize) {
         if let Some(chapter) = self.chapters.get_mut(idx) {
-            chapter.blocks.clear();
+            chapter.blocks = Arc::new(Vec::new());
             chapter.loaded = false;
         }
     }

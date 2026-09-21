@@ -167,7 +167,7 @@ impl ReaderApp {
             book.chapters.get(self.current_chapter).map(|chapter| {
                 (
                     chapter.title.clone(),
-                    chapter.blocks.clone(),
+                    Arc::clone(&chapter.blocks),
                     book.chapters.len(),
                 )
             })
@@ -277,7 +277,7 @@ impl ReaderApp {
                     self.request_chapter_loads(&need_load);
                 }
                 let scroll_adjustment = self.continuous_scroll.take_scroll_adjustment();
-                let continuous_chapters: Vec<(String, Option<Vec<ContentBlock>>)> = self
+                let continuous_chapters: Vec<(String, Option<Arc<Vec<ContentBlock>>>)> = self
                     .book
                     .as_ref()
                     .map(|book| {
@@ -287,7 +287,7 @@ impl ReaderApp {
                                 (
                                     chapter.title.clone(),
                                     if chapter.loaded {
-                                        Some(chapter.blocks.clone())
+                                        Some(Arc::clone(&chapter.blocks))
                                     } else {
                                         None
                                     },

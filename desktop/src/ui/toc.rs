@@ -1,6 +1,7 @@
 //! Table of Contents (TOC) side-panel UI component.
 use crate::app::ReaderApp;
 use eframe::egui;
+use std::collections::HashSet;
 
 impl ReaderApp {
     pub fn render_toc(&mut self, ui: &mut egui::Ui) {
@@ -23,98 +24,107 @@ impl ReaderApp {
         }
         ui.add_space(4.0);
 
+        let mut clicked_chapter = None;
+        let mut bookmark_toggle = None;
         if let Some(book) = &self.book {
-            let toc = book.toc.clone();
+            let toc = &book.toc;
+            let bookmarked: HashSet<usize> = self
+                .book_config
+                .as_ref()
+                .map(|cfg| cfg.bookmarks.iter().map(|b| b.chapter).collect())
+                .unwrap_or_default();
+            let current_chapter = self.current_chapter;
             let should_scroll = self.scroll_toc_to_current;
             self.scroll_toc_to_current = false;
-            egui::ScrollArea::vertical()
-                .id_salt("toc_scroll")
-                .show(ui, |ui| {
-                    for entry in &toc {
-                        let is_current = entry.chapter_index == self.current_chapter;
-                        let ch_bookmarked = self.book_config.as_ref().is_some_and(|cfg| {
-                            cfg.bookmarks
-                                .iter()
-                                .any(|b| b.chapter == entry.chapter_index)
-                        });
+            const ROW_HEIGHT: f32 = 24.0;
+            let mut scroll_area = egui::ScrollArea::vertical().id_salt("toc_scroll");
+            if should_scroll {
+                if let Some(row) = toc
+                    .iter()
+                    .position(|entry| entry.chapter_index == current_chapter)
+                {
+                    scroll_area = scroll_area
+                        .vertical_scroll_offset((row as f32 * ROW_HEIGHT - 120.0).max(0.0));
+                }
+            }
+            scroll_area.show_rows(ui, ROW_HEIGHT, toc.len(), |ui, visible_rows| {
+                for entry in &toc[visible_rows] {
+                    let is_current = entry.chapter_index == current_chapter;
+                    let ch_bookmarked = bookmarked.contains(&entry.chapter_index);
 
-                        ui.horizontal(|ui| {
-                            let text = egui::RichText::new(&entry.title).size(14.0);
-                            let label = ui.selectable_label(is_current, text);
-                            if is_current && should_scroll {
-                                label.scroll_to_me(Some(egui::Align::Center));
-                            }
-                            if label.clicked() && entry.chapter_index != self.current_chapter {
-                                self.previous_chapter = Some(self.current_chapter);
-                                self.current_chapter = entry.chapter_index;
-                                self.current_block = 0;
-                                self.pending_restore_block = None;
-                                if self.scroll_mode {
-                                    // Reset the lazy window around the explicit target. The
-                                    // reader will scroll only after that chapter is mounted.
-                                    self.pending_scroll_chapter = Some(entry.chapter_index);
-                                    self.continuous_scroll
-                                        .reset(entry.chapter_index, self.total_chapters());
-                                } else {
-                                    self.pending_scroll_chapter = None;
-                                    self.scroll_to_top = true;
-                                }
-                                self.pages_dirty = true;
-                                self.current_page = 0;
-                                self.request_chapter_loads(&[entry.chapter_index]);
-                                if let Some(p) = &self.book_path {
-                                    let chap_title = self
-                                        .book
-                                        .as_ref()
-                                        .and_then(|b| b.chapters.get(self.current_chapter))
-                                        .map(|c| c.title.clone());
-                                    self.library.update_chapter(
-                                        &self.data_dir,
-                                        p,
-                                        self.current_chapter,
-                                        chap_title,
-                                    );
-                                }
-                            }
+                    ui.horizontal(|ui| {
+                        let text = egui::RichText::new(&entry.title).size(14.0);
+                        let label = ui.selectable_label(is_current, text);
+                        if label.clicked() && entry.chapter_index != current_chapter {
+                            clicked_chapter = Some(entry.chapter_index);
+                        }
 
-                            // Bookmark toggle at right edge
-                            let bm_icon = if ch_bookmarked { "★" } else { "☆" };
-                            let bm_color = if ch_bookmarked {
-                                egui::Color32::from_rgb(255, 200, 0)
-                            } else {
-                                egui::Color32::GRAY
-                            };
-                            let chapter_idx = entry.chapter_index;
-                            if ui
-                                .add(
-                                    egui::Button::new(
-                                        egui::RichText::new(bm_icon).size(14.0).color(bm_color),
-                                    )
-                                    .frame(false),
+                        let bm_icon = if ch_bookmarked { "★" } else { "☆" };
+                        let bm_color = if ch_bookmarked {
+                            egui::Color32::from_rgb(255, 200, 0)
+                        } else {
+                            egui::Color32::GRAY
+                        };
+                        let chapter_idx = entry.chapter_index;
+                        if ui
+                            .add(
+                                egui::Button::new(
+                                    egui::RichText::new(bm_icon).size(14.0).color(bm_color),
                                 )
-                                .on_hover_text(if ch_bookmarked {
-                                    "取消书签"
-                                } else {
-                                    "添加书签"
-                                })
-                                .clicked()
-                            {
-                                if let Some(cfg) = &mut self.book_config {
-                                    if ch_bookmarked {
-                                        cfg.bookmarks.retain(|b| b.chapter != chapter_idx);
-                                    } else {
-                                        cfg.bookmarks.push(reader_core::library::Bookmark {
-                                            chapter: chapter_idx,
-                                            block: 0,
-                                            created_at: reader_core::now_secs(),
-                                        });
-                                    }
-                                    cfg.save(&self.data_dir);
-                                }
-                            }
-                        });
-                    }
-                });
+                                .frame(false),
+                            )
+                            .on_hover_text(if ch_bookmarked {
+                                "取消书签"
+                            } else {
+                                "添加书签"
+                            })
+                            .clicked()
+                        {
+                            bookmark_toggle = Some((chapter_idx, ch_bookmarked));
+                        }
+                    });
+                }
+            });
+        }
+        if let Some((chapter_idx, was_bookmarked)) = bookmark_toggle {
+            if let Some(cfg) = &mut self.book_config {
+                if was_bookmarked {
+                    cfg.bookmarks.retain(|b| b.chapter != chapter_idx);
+                } else {
+                    cfg.bookmarks.push(reader_core::library::Bookmark {
+                        chapter: chapter_idx,
+                        block: 0,
+                        created_at: reader_core::now_secs(),
+                    });
+                }
+                cfg.save(&self.data_dir);
+            }
+        }
+        if let Some(chapter_idx) = clicked_chapter {
+            self.previous_chapter = Some(self.current_chapter);
+            self.current_chapter = chapter_idx;
+            self.current_block = 0;
+            self.pending_restore_block = None;
+            if self.scroll_mode {
+                self.pending_scroll_chapter = Some(chapter_idx);
+                self.continuous_scroll
+                    .reset(chapter_idx, self.total_chapters());
+            } else {
+                self.pending_scroll_chapter = None;
+                self.scroll_to_top = true;
+            }
+            self.pages_dirty = true;
+            self.current_page = 0;
+            self.request_chapter_loads(&[chapter_idx]);
+            if let Some(p) = &self.book_path {
+                let chap_title = self
+                    .book
+                    .as_ref()
+                    .and_then(|b| b.chapters.get(chapter_idx))
+                    .map(|c| c.title.clone());
+                self.library
+                    .update_chapter(&self.data_dir, p, chapter_idx, chap_title);
+            }
         }
     }
 }
