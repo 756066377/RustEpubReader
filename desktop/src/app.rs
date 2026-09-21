@@ -2817,6 +2817,16 @@ impl eframe::App for ReaderApp {
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.last_egui_ctx = Some(ctx.clone());
+        let panel_layout_before = (
+            self.reader_toolbar_visible,
+            self.show_toc,
+            self.show_settings,
+            self.show_search,
+            self.show_annotations,
+            self.show_stats,
+            self.show_sharing_panel,
+            self.show_tts_panel,
+        );
         self.sync_reader_window_level(ctx);
         self.handle_root_viewport_resize(ctx);
         self.handle_reader_shortcuts(ctx);
@@ -3453,6 +3463,23 @@ impl eframe::App for ReaderApp {
             self.render_txt_import(ctx);
         }
         self.render_book_opening(ctx);
+
+        let panel_layout_after = (
+            self.reader_toolbar_visible,
+            self.show_toc,
+            self.show_settings,
+            self.show_search,
+            self.show_annotations,
+            self.show_stats,
+            self.show_sharing_panel,
+            self.show_tts_panel,
+        );
+        if panel_layout_before != panel_layout_after && self.view == AppView::Reader {
+            // Every chrome panel can change the reader's available width or height.
+            // Preserve the logical chapter/block anchor before the next layout pass.
+            self.pending_restore_block = Some(self.current_block);
+            self.layout_reanchor_pending = true;
+        }
 
         self.sync_root_viewport_geometry(ctx);
         let settings = AppSettings::from_app(self);

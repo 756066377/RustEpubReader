@@ -70,32 +70,31 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Download Windows artifact
         uses: actions/download-artifact@v4
         with:
           name: windows-desktop-build
           path: release-artifacts
 
+      - name: Extract release notes from changelog
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          awk -v tag="$RELEASE_TAG" \
+            -f .github/scripts/extract-release-notes.awk \
+            CHANGELOG.md > release-notes.md
+          test -s release-notes.md
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
           name: RustEpubReader ${{ github.ref_name }}
-          body: |
-            ## v1.0.20
-
-            Windows 64 位隐蔽阅读发行版。
-
-            ### 修复
-            - 修复目录切换到未加载章节时一直停留在“正在加载章节”的问题。
-            - 加载 worker 已扫描过目标章节时，会自动排队并重新加载目标，不再漏加载。
-            - 继续保持单 worker，避免高速目录点击创建大量 EPUB 文件句柄。
-
-            ### 说明
-            - 基于 v1.0.19。
-            - CI 发行版构建仍只生成 Windows 桌面端产物。
-
-            ### 下载
-            - `RustEpubReader-Win64-v1.0.20.exe`
+          body_path: release-notes.md
           files: |
             release-artifacts/RustEpubReader-Win64-*.exe
