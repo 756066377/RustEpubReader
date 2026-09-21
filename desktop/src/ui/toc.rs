@@ -47,9 +47,21 @@ impl ReaderApp {
                             if label.clicked() && entry.chapter_index != self.current_chapter {
                                 self.previous_chapter = Some(self.current_chapter);
                                 self.current_chapter = entry.chapter_index;
-                                self.scroll_to_top = true;
+                                self.current_block = 0;
+                                self.pending_restore_block = None;
+                                if self.scroll_mode {
+                                    // Reset the lazy window around the explicit target. The
+                                    // reader will scroll only after that chapter is mounted.
+                                    self.pending_scroll_chapter = Some(entry.chapter_index);
+                                    self.continuous_scroll
+                                        .reset(entry.chapter_index, self.total_chapters());
+                                } else {
+                                    self.pending_scroll_chapter = None;
+                                    self.scroll_to_top = true;
+                                }
                                 self.pages_dirty = true;
                                 self.current_page = 0;
+                                self.request_chapter_loads(&[entry.chapter_index]);
                                 if let Some(p) = &self.book_path {
                                     let chap_title = self
                                         .book

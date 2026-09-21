@@ -257,6 +257,17 @@ impl ReaderApp {
                 {
                     self.continuous_scroll.reset(self.current_chapter, total_ch);
                 }
+                // An explicit TOC target owns the scroll position until its chapter has
+                // been rendered. Do not let the old window or prepend/append logic win.
+                if let Some(target) = self.pending_scroll_chapter {
+                    if target != self.current_chapter {
+                        self.pending_scroll_chapter = None;
+                    } else if self.continuous_scroll.start_chapter != target
+                        || self.continuous_scroll.loaded_end != target + 1
+                    {
+                        self.continuous_scroll.reset(target, total_ch);
+                    }
+                }
                 let loaded_end = self.continuous_scroll.loaded_end;
                 let start_chapter = self.continuous_scroll.start_chapter;
                 let need_load: Vec<usize> = (start_chapter..loaded_end).collect();
@@ -303,6 +314,7 @@ impl ReaderApp {
                         by_chapter
                     })
                     .unwrap_or_default();
+                let mut target_chapter_rect = None;
                 let empty_highlights: HashMap<
                     usize,
                     Vec<(usize, usize, reader_core::library::HighlightColor)>,
@@ -318,10 +330,10 @@ impl ReaderApp {
                 let mut scroll_area = egui::ScrollArea::vertical()
                     .auto_shrink([false; 2])
                     .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden);
-                if self.scroll_to_top {
+                if self.pending_scroll_chapter.is_none() && self.scroll_to_top {
                     scroll_area = scroll_area.vertical_scroll_offset(0.0);
                     self.scroll_to_top = false;
-                } else if scroll_adjustment != 0.0 {
+                } else if self.pending_scroll_chapter.is_none() && scroll_adjustment != 0.0 {
                     scroll_area = scroll_area.vertical_scroll_offset(
                         (self.continuous_scroll.scroll_offset + scroll_adjustment).max(0.0),
                     );
@@ -379,8 +391,20 @@ impl ReaderApp {
                             chapter_ranges,
                         );
                         let chapter_height = (ui.cursor().top() - chapter_top).max(0.0);
+                        if self.pending_scroll_chapter == Some(chapter_idx) {
+                            target_chapter_rect = Some(egui::Rect::from_min_max(
+                                egui::pos2(ui.clip_rect().left(), chapter_top),
+                                egui::pos2(ui.clip_rect().right(), ui.cursor().top()),
+                            ));
+                        }
                         self.continuous_scroll
                             .record_height(chapter_idx, chapter_height);
+                    }
+                    if let Some(target_rect) = target_chapter_rect {
+                        // Scroll after rendering: unloaded chapters have no geometry yet.
+                        ui.scroll_to_rect(target_rect, Some(egui::Align::Min));
+                        self.pending_scroll_chapter = None;
+                        self.scroll_to_top = false;
                     }
                     if let Some(target) = self.pending_restore_block {
                         BLOCK_GALLEYS.with(|galleys| {
@@ -431,6 +455,9 @@ impl ReaderApp {
                 }
                 self.evict_far_chapters();
             } else {
+                // A pending scroll-mode target is meaningful only while the continuous
+                // scroll area is mounted. Drop it when the user switches presentation mode.
+                self.pending_scroll_chapter = None;
                 let page_rect = ui.available_rect_before_wrap();
                 self.paging_page_rect = Some(page_rect);
                 if dual_column {

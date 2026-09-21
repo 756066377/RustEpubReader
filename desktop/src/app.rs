@@ -993,6 +993,8 @@ pub struct ReaderApp {
     pub window_position: Option<[f32; 2]>,
     pub window_size: Option<[f32; 2]>,
     pub scroll_to_top: bool,
+    /// Scroll-mode TOC navigation waits until the target chapter is mounted.
+    pub pending_scroll_chapter: Option<usize>,
     pub error_msg: Option<String>,
     pub view: AppView,
     pub library: Library,
@@ -1336,6 +1338,7 @@ impl Default for ReaderApp {
             window_position: None,
             window_size: None,
             scroll_to_top: false,
+            pending_scroll_chapter: None,
             error_msg: None,
             view: AppView::Library,
             library,
