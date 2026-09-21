@@ -433,7 +433,7 @@ impl ReaderApp {
                                 entry.key.chapter == self.current_chapter
                                     && entry.key.block == target
                             }) {
-                                if entry.rect.top() <= ui.clip_rect().top() + 1.0 {
+                                if (entry.rect.top() - ui.clip_rect().top()).abs() <= 2.0 {
                                     // The deferred scroll has taken effect. Only now may
                                     // visible-block tracking replace the restored position.
                                     self.pending_restore_block = None;

@@ -3426,6 +3426,24 @@ impl eframe::App for ReaderApp {
         // ── Review Panel ──
         self.render_review_panel(ctx);
 
+        let panel_layout_now = (
+            self.reader_toolbar_visible,
+            self.show_toc,
+            self.show_settings,
+            self.show_search,
+            self.show_annotations,
+            self.show_stats,
+            self.show_sharing_panel,
+            self.show_tts_panel,
+        );
+        if panel_layout_before != panel_layout_now && self.view == AppView::Reader {
+            // Capture the logical anchor before CentralPanel is laid out at its
+            // new size. Waiting until the end of the frame lets the new layout
+            // overwrite current_chapter/current_block with a transient position.
+            self.pending_restore_block = Some(self.current_block);
+            self.layout_reanchor_pending = true;
+        }
+
         egui::CentralPanel::default()
             .frame(egui::Frame::default().fill(reader_fill))
             .show(ctx, |ui| match self.view {
@@ -3463,23 +3481,6 @@ impl eframe::App for ReaderApp {
             self.render_txt_import(ctx);
         }
         self.render_book_opening(ctx);
-
-        let panel_layout_after = (
-            self.reader_toolbar_visible,
-            self.show_toc,
-            self.show_settings,
-            self.show_search,
-            self.show_annotations,
-            self.show_stats,
-            self.show_sharing_panel,
-            self.show_tts_panel,
-        );
-        if panel_layout_before != panel_layout_after && self.view == AppView::Reader {
-            // Every chrome panel can change the reader's available width or height.
-            // Preserve the logical chapter/block anchor before the next layout pass.
-            self.pending_restore_block = Some(self.current_block);
-            self.layout_reanchor_pending = true;
-        }
 
         self.sync_root_viewport_geometry(ctx);
         let settings = AppSettings::from_app(self);
