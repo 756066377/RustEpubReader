@@ -249,7 +249,12 @@ impl ReaderApp {
                     .continuous_scroll
                     .update_layout_signature(layout_hasher.finish())
                 {
-                    self.scroll_to_top = true;
+                    // Opening a side panel or resizing changes text width. Re-anchor
+                    // to the logical reading position instead of offset 0, which may
+                    // belong to the previous chapter in the continuous window.
+                    self.continuous_scroll.reset(self.current_chapter, total_ch);
+                    self.pending_restore_block = Some(self.current_block);
+                    self.scroll_to_top = false;
                 }
                 if self
                     .continuous_scroll
