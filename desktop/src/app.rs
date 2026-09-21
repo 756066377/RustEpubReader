@@ -2267,11 +2267,17 @@ impl ReaderApp {
     }
 
     pub fn schedule_position_save(&mut self, chapter: usize, block: usize) {
+        let chapter_changed = self.current_chapter != chapter;
         if self.current_chapter != chapter || self.current_block != block {
             self.current_chapter = chapter;
             self.current_block = block;
             self.position_save_due =
                 Some(std::time::Instant::now() + std::time::Duration::from_millis(400));
+            if chapter_changed {
+                if let Some(ctx) = &self.last_egui_ctx {
+                    ctx.request_repaint();
+                }
+            }
         }
     }
 
