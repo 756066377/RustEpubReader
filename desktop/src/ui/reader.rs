@@ -271,7 +271,11 @@ impl ReaderApp {
                 let loaded_end = self.continuous_scroll.loaded_end;
                 let start_chapter = self.continuous_scroll.start_chapter;
                 let need_load: Vec<usize> = (start_chapter..loaded_end).collect();
-                self.request_chapter_loads(&need_load);
+                // Full-book search owns the chapter loader until every chapter
+                // has been indexed; the viewport must not overwrite its wanted set.
+                if self.pending_search_query.is_none() {
+                    self.request_chapter_loads(&need_load);
+                }
                 let scroll_adjustment = self.continuous_scroll.take_scroll_adjustment();
                 let continuous_chapters: Vec<(String, Option<Vec<ContentBlock>>)> = self
                     .book
@@ -323,6 +327,8 @@ impl ReaderApp {
                     && ui.input(|i| i.raw_scroll_delta.y != 0.0)
                 {
                     let scroll_delta_y = ui.input(|i| i.raw_scroll_delta.y);
+                    // A user scroll explicitly takes over from startup position restore.
+                    self.pending_restore_block = None;
                     self.continuous_scroll
                         .allow_prepend_after_user_scroll(scroll_delta_y);
                     self.tts_detach_view();
@@ -412,10 +418,13 @@ impl ReaderApp {
                                 entry.key.chapter == self.current_chapter
                                     && entry.key.block == target
                             }) {
-                                if !entry.rect.intersects(ui.clip_rect()) {
+                                if entry.rect.top() <= ui.clip_rect().top() + 1.0 {
+                                    // The deferred scroll has taken effect. Only now may
+                                    // visible-block tracking replace the restored position.
+                                    self.pending_restore_block = None;
+                                } else {
                                     ui.scroll_to_rect(entry.rect, Some(egui::Align::Min));
                                 }
-                                self.pending_restore_block = None;
                             }
                         });
                     }
@@ -434,9 +443,11 @@ impl ReaderApp {
                         .min_by(|a, b| a.rect.top().total_cmp(&b.rect.top()))
                         .map(|entry| (entry.key.chapter, entry.key.block))
                 });
-                if let Some((chapter, block)) = visible_block {
-                    self.continuous_scroll.set_visible_chapter(chapter);
-                    self.schedule_position_save(chapter, block);
+                if self.pending_restore_block.is_none() {
+                    if let Some((chapter, block)) = visible_block {
+                        self.continuous_scroll.set_visible_chapter(chapter);
+                        self.schedule_position_save(chapter, block);
+                    }
                 }
                 let near_start = self.continuous_scroll.near_start();
                 let near_end = self.continuous_scroll.near_end();

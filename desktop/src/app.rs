@@ -1243,54 +1243,8 @@ pub type ChapterLoadSlot =
     Arc<Mutex<Option<Result<Vec<(usize, Vec<reader_core::epub::ContentBlock>)>, String>>>>;
 
 pub struct ChapterLoadJob {
-    pub indices: Vec<usize>,
     pub wanted: Arc<Mutex<HashSet<usize>>>,
-    pub cancel: Arc<AtomicBool>,
     pub slot: ChapterLoadSlot,
-}
-
-fn should_replace_chapter_load(
-    active: &[usize],
-    needed: &[usize],
-    priority_target: Option<usize>,
-    searching: bool,
-) -> bool {
-    if searching {
-        return false;
-    }
-    priority_target
-        .filter(|target| needed.contains(target))
-        .map_or_else(
-            || needed.iter().any(|idx| !active.contains(idx)),
-            |target| active != [target],
-        )
-}
-
-#[cfg(test)]
-mod chapter_load_tests {
-    use super::should_replace_chapter_load;
-
-    #[test]
-    fn priority_target_replaces_prefetch_batch() {
-        assert!(should_replace_chapter_load(&[2, 3], &[8], Some(8), false));
-    }
-
-    #[test]
-    fn priority_target_reuses_only_matching_single_target_job() {
-        assert!(!should_replace_chapter_load(&[8], &[8], Some(8), false));
-        assert!(should_replace_chapter_load(&[8, 9], &[8], Some(8), false));
-    }
-
-    #[test]
-    fn ordinary_prefetch_reuses_job_when_all_chapters_are_present() {
-        assert!(!should_replace_chapter_load(&[2, 3], &[2], None, false));
-        assert!(should_replace_chapter_load(&[2], &[3], None, false));
-    }
-
-    #[test]
-    fn search_loads_are_not_replaced() {
-        assert!(!should_replace_chapter_load(&[2], &[9], Some(9), true));
-    }
 }
 
 /// TXT 导入对话框状态。
@@ -1843,28 +1797,15 @@ impl ReaderApp {
                     .is_some_and(|chapter| !chapter.loaded && chapter.source_href.is_some())
             })
             .collect();
-        let searching = self.pending_search_query.is_some() || self.show_search;
-
         if let Some(job) = &self.chapter_load {
-            // A TOC jump must not wait behind an old prefetch batch. Cancel the
-            // obsolete worker and start a new one immediately; the old worker
-            // owns its Arcs and will safely discard its result when it exits.
-            let should_replace_job = should_replace_chapter_load(
-                &job.indices,
-                &needed,
-                self.pending_scroll_chapter,
-                searching,
-            );
-            if should_replace_job {
-                job.cancel.store(true, Ordering::Relaxed);
-                self.chapter_load = None;
-            } else {
-                if let Ok(mut wanted) = job.wanted.lock() {
-                    wanted.clear();
-                    wanted.extend(needed.iter().copied());
-                }
-                return;
+            // Keep one EPUB parser worker alive at a time. Rapid TOC clicks and
+            // full-book search only replace its wanted set, so they cannot spawn
+            // a pile of concurrent File::open calls.
+            if let Ok(mut wanted) = job.wanted.lock() {
+                wanted.clear();
+                wanted.extend(needed.iter().copied());
             }
+            return;
         }
 
         if needed.is_empty() {
@@ -1874,40 +1815,30 @@ impl ReaderApp {
             return;
         };
         let image_paths = book.image_resource_paths().to_vec();
-        let jobs: Vec<(usize, String)> = needed
+        // Keep every chapter in the worker's scan list. The wanted set is
+        // mutable, allowing a later TOC click to retarget the same worker even
+        // when the new chapter was not part of the original prefetch batch.
+        let jobs: Vec<(usize, String)> = book
+            .chapters
             .iter()
-            .copied()
-            .filter_map(|idx| {
-                book.chapters
-                    .get(idx)
-                    .and_then(|chapter| chapter.source_href.clone())
-                    .map(|href| (idx, href))
-            })
+            .enumerate()
+            .filter_map(|(idx, chapter)| chapter.source_href.clone().map(|href| (idx, href)))
             .collect();
         if jobs.is_empty() {
             return;
         }
-        let indices: Vec<usize> = jobs.iter().map(|(i, _)| *i).collect();
-        let wanted = Arc::new(Mutex::new(indices.iter().copied().collect::<HashSet<_>>()));
-        let cancel = Arc::new(AtomicBool::new(false));
+        let wanted = Arc::new(Mutex::new(needed.iter().copied().collect::<HashSet<_>>()));
         let slot: ChapterLoadSlot = Arc::new(Mutex::new(None));
         let slot_clone = slot.clone();
         let wanted_clone = wanted.clone();
-        let cancel_clone = cancel.clone();
-        self.chapter_load = Some(ChapterLoadJob {
-            indices,
-            wanted,
-            cancel,
-            slot,
-        });
+        self.chapter_load = Some(ChapterLoadJob { wanted, slot });
         std::thread::spawn(move || {
             let result =
                 EpubBook::parse_chapters_from_file_while(&epub_path, &jobs, &image_paths, |idx| {
-                    !cancel_clone.load(Ordering::Relaxed)
-                        && wanted_clone
-                            .lock()
-                            .map(|wanted| wanted.contains(&idx))
-                            .unwrap_or(false)
+                    wanted_clone
+                        .lock()
+                        .map(|wanted| wanted.contains(&idx))
+                        .unwrap_or(false)
                 });
             if let Ok(mut guard) = slot_clone.lock() {
                 *guard = Some(result);
@@ -1926,7 +1857,7 @@ impl ReaderApp {
             self.chapter_load = None;
             match result {
                 Ok(chapters) => {
-                    let searching = self.pending_search_query.is_some() || self.show_search;
+                    let searching = self.pending_search_query.is_some();
                     let keep_start = self.continuous_scroll.start_chapter.saturating_sub(1);
                     let keep_end =
                         (self.continuous_scroll.loaded_end + 1).min(self.total_chapters());
