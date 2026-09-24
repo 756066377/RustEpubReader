@@ -160,7 +160,18 @@ impl ContinuousScrollState {
         if !height.is_finite() || height <= 0.0 {
             return;
         }
-        let old = self.chapter_heights.insert(chapter, height);
+        // Text layout can vary by tiny sub-point amounts as the scroll offset is
+        // resolved. Feeding those differences back into the scroll anchor makes
+        // text near the top of the viewport visibly shimmer between frames.
+        let height = height.round();
+        let old = self.chapter_heights.get(&chapter).copied();
+        if old.is_some_and(|previous| (previous - height).abs() < 1.0) {
+            if self.awaiting_prepend_measurement && chapter == self.start_chapter {
+                self.awaiting_prepend_measurement = false;
+            }
+            return;
+        }
+        self.chapter_heights.insert(chapter, height);
         if chapter < self.visible_chapter {
             let baseline = old.unwrap_or(CHAPTER_PLACEHOLDER_HEIGHT);
             self.pending_scroll_adjustment += height - baseline;
@@ -612,6 +623,19 @@ mod tests {
         assert_eq!(state.prepend_previous(), Some(1));
         state.record_height(1, 400.0);
         assert_eq!(state.take_scroll_adjustment(), 400.0);
+    }
+
+    #[test]
+    fn subpixel_height_noise_does_not_move_scroll_anchor() {
+        let mut state = ContinuousScrollState::default();
+        state.reset(2, 5);
+        state.record_height(1, 400.2);
+        let _ = state.take_scroll_adjustment();
+
+        state.record_height(1, 400.4);
+
+        assert_eq!(state.take_scroll_adjustment(), 0.0);
+        assert_eq!(state.chapter_heights.get(&1), Some(&400.0));
     }
 
     #[test]
